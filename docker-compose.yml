@@ -1,0 +1,114 @@
+version: "3.9"
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: flood_redis
+    ports:
+      - "6379:6379"
+
+  db:
+    image: postgres:16-alpine
+    container_name: flood_db
+    environment:
+      - POSTGRES_USER=flood
+      - POSTGRES_PASSWORD=flood
+      - POSTGRES_DB=flood
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  control_plane:
+    build: ./control_plane
+    container_name: flood_control_plane
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://flood:flood@db:5432/flood
+    ports:
+      - "8004:8004"
+    depends_on:
+      - redis
+      - db
+
+  api:
+    build:
+      context: ./api
+    container_name: flood_api
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATA_DIR=/data
+    volumes:
+      - data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+
+  downloader:
+    image: alpine/aria2
+    container_name: flood_downloader
+    command: ["sleep", "infinity"]
+    volumes:
+      - data:/data
+
+  snap:
+    build: ./snap
+    container_name: flood_snap
+    volumes:
+      - ./data:/data
+    command: [ "sleep","infinity" ]
+
+  worker:
+    build: ./worker
+    container_name: flood_worker
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATA_DIR=/data
+      - BASIN_GEOJSON=/work/basin_bc.geojson
+    volumes:
+      - ./data:/data
+      - ./basin_bc.geojson:/work/basin_bc.geojson:ro
+    depends_on:
+      - redis
+      - snap
+
+  dem_worker:
+    build: ./dem_worker
+    container_name: flood_dem_worker
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATA_DIR=/data
+      - STREAM_THRESHOLD=1000
+    volumes:
+      - ./data:/data
+      - ./basin_bc.geojson:/work/basin_bc.geojson:ro
+    depends_on:
+      - redis
+
+  dem_analysis_worker:
+    build: ./dem_analysis_worker
+    container_name: flood_dem_analysis_worker
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATA_DIR=/data
+    volumes:
+      - ./data:/data
+    depends_on:
+      - redis
+
+  terracotta_listener:
+    build: ./terracotta_listener
+    container_name: flood_terracotta_listener
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - TERRACOTTA_URL=http://terracotta:5000
+    volumes:
+      - ./data:/data
+    depends_on:
+      - redis
+
+volumes:
+  data:
+  pgdata:

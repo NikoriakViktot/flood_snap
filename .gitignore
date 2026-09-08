@@ -1,3 +1,26 @@
+# Local datasets and processing outputs
+/data/
+
+# PyCharm temporary support files
+/253_28294_336-pycharm-support-libs/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# System files
+.DS_Store
+Thumbs.db
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
