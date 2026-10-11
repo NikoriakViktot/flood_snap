@@ -12,6 +12,8 @@ from contextlib import asynccontextmanager
 
 import redis
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from control_plane.infrastructure.db.session import engine, SessionLocal
 from control_plane.infrastructure.db.base import Base
@@ -29,6 +31,8 @@ logging.basicConfig(
 log = logging.getLogger("control_plane")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+PRODUCTS_DIR = os.getenv("PRODUCTS_DIR", "/data/products")
+CORS_ORIGINS = [o for o in os.getenv("CORS_ORIGINS", "").split(",") if o]
 
 
 async def _event_loop():
@@ -39,7 +43,7 @@ async def _event_loop():
 
     while True:
         try:
-            envelope = event_bus.consume(timeout=5)
+            envelope = await asyncio.to_thread(event_bus.consume, 5)
             if envelope is None:
                 await asyncio.sleep(0.1)
                 continue
@@ -68,6 +72,7 @@ async def _event_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    os.makedirs(PRODUCTS_DIR, exist_ok=True)
     task = asyncio.create_task(_event_loop())
     yield
     task.cancel()
@@ -85,4 +90,16 @@ def health():
     return {"status": "ok", "system": "flood_control_plane"}
 
 
+if CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ORIGINS,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
 app.include_router(api_router.router)
+
+# Basin passports (GeoJSON vectors, manifests) → {PUBLIC_BASE}/files/{basin_id}/...
+os.makedirs(PRODUCTS_DIR, exist_ok=True)
+app.mount("/files", StaticFiles(directory=PRODUCTS_DIR), name="files")

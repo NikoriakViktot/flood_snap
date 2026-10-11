@@ -21,5 +21,8 @@ class EventType(str, Enum):
     ANALYSIS_COMPLETED = "ANALYSIS_COMPLETED"  # all stems processed, manifest written
     ANALYSIS_FAILED    = "ANALYSIS_FAILED"      # pipeline error in analysis context
 
+    # basin delineation worker events
+    BASIN_COMPLETED = "BASIN_COMPLETED"     # manifest.json written, tiles ingested
+
     # flood context failure
     FAILED = "FAILED"

@@ -45,6 +45,8 @@ class SubmitContractUseCase:
             new_state = RunState.MASK_RUNNING
         elif c_type == "dem.analysis.v1":
             new_state = RunState.ANALYSIS_RUNNING
+        elif c_type == "basin.delineation.v1":
+            new_state = RunState.BASIN_RUNNING
         else:
             new_state = transition(RunState.CREATED, EventType.CONTRACT_ACCEPTED)
 

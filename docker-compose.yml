@@ -1,66 +1,189 @@
-version: "3.9"
+# Default profile (basin delineation for the frontend):
+#   docker compose up -d --build
+#     redis, db, control_plane (:8004), dem_worker, terracotta (:5000), s3 (SeaweedFS :58334)
+# Optional:
+#   --profile sar        SNAP SAR worker (needs `docker build -t flood-snap:latest ./snap` first)
+#   --profile analysis   xdem dem_analysis_worker
+#   --profile api        CDSE catalogue API (needs CDSE_USER / CDSE_PASS)
+#
+# All ports bind to 127.0.0.1: nothing is exposed beyond this machine.
+
+x-s3-env: &s3-env
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-flood}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-flood-secret}
+  AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+  # Local SeaweedFS by default; set AWS_ENDPOINT_URL= (empty) in .env to use AWS S3.
+  AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL-http://s3:8333}
+  # Keep both for any non-AWS S3, otherwise objects are stored aws-chunked (corrupted).
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+  S3_BUCKET: ${S3_BUCKET-geohydro}
+  S3_PREFIX: ${S3_PREFIX:-hydro/lake}
+  S3_WRITABLE_PREFIXES: ${S3_WRITABLE_PREFIXES:-staging,serving,curated,hydro/lake}
 
 services:
 
   redis:
     image: redis:7-alpine
     container_name: flood_redis
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb"]
+    mem_limit: 192m
+    volumes:
+      - redisdata:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
 
   db:
     image: postgres:16-alpine
     container_name: flood_db
     environment:
       - POSTGRES_USER=flood
-      - POSTGRES_PASSWORD=flood
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-flood}
       - POSTGRES_DB=flood
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=30"]
+    mem_limit: 384m
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flood -d flood"]
+      interval: 5s
+      retries: 20
 
   control_plane:
     build: ./control_plane
     container_name: flood_control_plane
     environment:
       - REDIS_URL=redis://redis:6379/0
-      - DATABASE_URL=postgresql://flood:flood@db:5432/flood
+      - DATABASE_URL=postgresql+psycopg2://flood:${POSTGRES_PASSWORD:-flood}@db:5432/flood
+      - PRODUCTS_DIR=/data/products
+      # browser-facing prefixes (vite proxy in dev, nginx in production)
+      - PUBLIC_BASE=${PUBLIC_BASE:-/api}
+      - TC_PUBLIC_BASE=${TC_PUBLIC_BASE:-/tc}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+    mem_limit: 384m
+    volumes:
+      - ./data:/data
     ports:
-      - "8004:8004"
+      - "127.0.0.1:8004:8004"
     depends_on:
-      - redis
-      - db
+      redis: {condition: service_healthy}
+      db: {condition: service_healthy}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8004/health"]
+      interval: 10s
+      retries: 10
+
+  dem_worker:
+    build: ./dem_worker
+    container_name: flood_dem_worker
+    environment:
+      <<: *s3-env
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+      STREAM_THRESHOLD: "1000"
+      DEFAULT_DEM_BBOX: ${DEFAULT_DEM_BBOX:-24.40,47.55,25.45,48.35}
+      TC_DB: /data/tc/terracotta.sqlite
+      FABDEM_SOURCE: ${FABDEM_SOURCE:-}
+      GDAL_CACHEMAX: "256"
+      GDAL_WARP_MEMORY_MB: "256"
+    # measured peak: 0.73 GB for a 1,500 km² basin, 0.64 GB for an 8.2 M-cell terrain build (2 CPU)
+    mem_limit: ${DEM_WORKER_MEM:-3g}
+    cpus: ${DEM_WORKER_CPUS:-2}
+    volumes:
+      - ./data:/data
+      - ./basin_bc.geojson:/work/basin_bc.geojson:ro
+    depends_on:
+      redis: {condition: service_healthy}
+    restart: unless-stopped
+
+  terracotta:
+    build: ./terracotta
+    container_name: flood_terracotta
+    environment:
+      - TC_DRIVER_PATH=/data/tc/terracotta.sqlite
+      - TC_WORKERS=${TC_WORKERS:-2}
+      - GDAL_CACHEMAX=128
+    mem_limit: ${TC_MEM:-768m}
+    volumes:
+      - ./data:/data:ro
+    ports:
+      - "127.0.0.1:5000:5000"
+    restart: unless-stopped
+
+  # Local S3-compatible store (SeaweedFS). In production point AWS_* / S3_BUCKET at the real bucket
+  # and drop this service.
+  s3:
+    image: chrislusf/seaweedfs:3.80
+    container_name: flood_s3
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+    volumes:
+      - s3data:/data
+      - ./docker/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+    ports:
+      - "127.0.0.1:58334:8333"
+    restart: unless-stopped
+
+  s3-init:
+    build: ./dem_worker
+    environment:
+      <<: *s3-env
+    entrypoint: ["python3", "-c"]
+    command:
+      - |
+        import os, time, boto3
+        b = os.environ["S3_BUCKET"]
+        s3 = boto3.client("s3", endpoint_url=os.environ.get("AWS_ENDPOINT_URL") or None)
+        for _ in range(60):
+            try:
+                if b not in [x["Name"] for x in s3.list_buckets()["Buckets"]]:
+                    s3.create_bucket(Bucket=b)
+                print("bucket ready:", b); break
+            except Exception as exc:
+                print("waiting for s3:", exc); time.sleep(2)
+        else:
+            raise SystemExit("s3 never came up")
+    depends_on: [s3]
+    restart: "no"
+
+  # ---------------------------------------------------------------- optional profiles
 
   api:
+    profiles: ["api"]
     build:
       context: ./api
     container_name: flood_api
     environment:
       - REDIS_URL=redis://redis:6379/0
       - DATA_DIR=/data
+      - CDSE_USER=${CDSE_USER:-}
+      - CDSE_PASS=${CDSE_PASS:-}
     volumes:
-      - data:/data
+      - ./data:/data
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       - redis
 
-  downloader:
-    image: alpine/aria2
-    container_name: flood_downloader
-    command: ["sleep", "infinity"]
-    volumes:
-      - data:/data
-
   snap:
+    profiles: ["sar"]
     build: ./snap
+    image: flood-snap:latest
     container_name: flood_snap
     volumes:
       - ./data:/data
     command: [ "sleep","infinity" ]
 
   worker:
+    profiles: ["sar"]
     build: ./worker
     container_name: flood_worker
     environment:
@@ -74,20 +197,8 @@ services:
       - redis
       - snap
 
-  dem_worker:
-    build: ./dem_worker
-    container_name: flood_dem_worker
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - DATA_DIR=/data
-      - STREAM_THRESHOLD=1000
-    volumes:
-      - ./data:/data
-      - ./basin_bc.geojson:/work/basin_bc.geojson:ro
-    depends_on:
-      - redis
-
   dem_analysis_worker:
+    profiles: ["analysis"]
     build: ./dem_analysis_worker
     container_name: flood_dem_analysis_worker
     environment:
@@ -98,17 +209,7 @@ services:
     depends_on:
       - redis
 
-  terracotta_listener:
-    build: ./terracotta_listener
-    container_name: flood_terracotta_listener
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - TERRACOTTA_URL=http://terracotta:5000
-    volumes:
-      - ./data:/data
-    depends_on:
-      - redis
-
 volumes:
-  data:
   pgdata:
+  redisdata:
+  s3data:

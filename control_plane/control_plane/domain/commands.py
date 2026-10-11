@@ -42,9 +42,28 @@ class StartAnalysis:
 
 
 @dataclass(frozen=True)
+class StartBasin:
+    run_id: str
+    basin_id: str
+    dem_source: str
+    outlet_lon: float
+    outlet_lat: float
+    snap_distance_m: float
+    stream_threshold: int
+    hand_threshold_m: float
+    max_slope_deg: float | None
+    flood_levels_m: list[int]
+    dem_bbox: list[float] | None
+    target_epsg: str
+    pixel_size_m: float
+    cn_grid_tif: str | None = None
+    project_id: str | None = None
+
+
+@dataclass(frozen=True)
 class Notify:
     run_id: str
     artifacts: dict
 
 
-Command = Union[StartSar, StartDem, StartMask, StartAnalysis, Notify]
+Command = Union[StartSar, StartDem, StartMask, StartAnalysis, StartBasin, Notify]

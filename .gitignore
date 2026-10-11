@@ -239,3 +239,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# large local rasters
+*.tif
+!tests/**/*.tif
+!.env.example
+*.aux.xml
