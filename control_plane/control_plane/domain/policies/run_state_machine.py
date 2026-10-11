@@ -15,8 +15,9 @@ from __future__ import annotations
 from control_plane.domain.states import RunState
 from control_plane.domain.events import EventType
 from control_plane.domain.commands import (
-    Command, StartSar, StartDem, StartMask, StartAnalysis, Notify,
+    Command, StartSar, StartDem, StartMask, StartAnalysis, StartBasin, Notify,
 )
+from control_plane.domain.contracts.basin_delineation_v1 import basin_id_for, BasinDelineationPayloadV1
 from control_plane.domain.specs import DemAnalysisSpec, dem_analysis_spec_from_dict
 from control_plane.domain.ports.run_repository import RunRecord
 
@@ -39,6 +40,10 @@ _TRANSITIONS: dict[tuple[RunState, EventType], RunState] = {
     # analysis context — own terminal states (no cross-context bleeding)
     (RunState.ANALYSIS_RUNNING, EventType.ANALYSIS_COMPLETED): RunState.ANALYSIS_COMPLETED,
     (RunState.ANALYSIS_RUNNING, EventType.ANALYSIS_FAILED):    RunState.ANALYSIS_FAILED,
+
+    # basin delineation context
+    (RunState.BASIN_RUNNING, EventType.BASIN_COMPLETED): RunState.DONE,
+    (RunState.BASIN_RUNNING, EventType.FAILED):          RunState.FAILED,
 }
 
 _ACTIONS: dict[tuple[RunState, EventType], str] = {
@@ -51,6 +56,10 @@ _ACTIONS: dict[tuple[RunState, EventType], str] = {
     # analysis context
     (RunState.ANALYSIS_RUNNING,   EventType.CONTRACT_ACCEPTED):  "DEM_ANALYSIS",
     (RunState.ANALYSIS_COMPLETED, EventType.ANALYSIS_COMPLETED): "NOTIFY",
+
+    # basin delineation context
+    (RunState.BASIN_RUNNING, EventType.CONTRACT_ACCEPTED): "BASIN_DELINEATE",
+    (RunState.DONE,          EventType.BASIN_COMPLETED):   "NOTIFY",
 }
 
 
@@ -111,6 +120,26 @@ def build_command(state: RunState, event: EventType, run: RunRecord) -> Command 
     if action == "DEM_ANALYSIS":
         spec: DemAnalysisSpec = dem_analysis_spec_from_dict(payload)
         return StartAnalysis(run_id=run_id, spec=spec)
+
+    if action == "BASIN_DELINEATE":
+        p = BasinDelineationPayloadV1.model_validate(payload)
+        return StartBasin(
+            run_id=run_id,
+            basin_id=basin_id_for(p),
+            dem_source=p.dem_source,
+            outlet_lon=p.outlet.lon,
+            outlet_lat=p.outlet.lat,
+            snap_distance_m=p.snap_distance_m,
+            stream_threshold=p.stream_threshold,
+            hand_threshold_m=p.hand_threshold_m,
+            max_slope_deg=p.max_slope_deg,
+            flood_levels_m=list(p.flood_levels_m),
+            dem_bbox=p.dem_bbox,
+            target_epsg=p.target_epsg,
+            pixel_size_m=p.pixel_size_m,
+            cn_grid_tif=p.cn_grid_tif,
+            project_id=p.project_id,
+        )
 
     if action == "NOTIFY":
         return Notify(run_id=run_id, artifacts=run.artifacts)

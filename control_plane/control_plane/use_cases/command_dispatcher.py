@@ -6,7 +6,7 @@ import logging
 from dataclasses import asdict
 
 from control_plane.domain.commands import (
-    Command, StartSar, StartDem, StartMask, StartAnalysis, Notify,
+    Command, StartSar, StartDem, StartMask, StartAnalysis, StartBasin, Notify,
 )
 from control_plane.domain.ports.job_queue import JobQueue
 
@@ -17,6 +17,7 @@ COMMAND_QUEUE_MAP = {
     StartDem: "dem_jobs",
     StartMask: "mask_jobs",
     StartAnalysis: "dem_analysis_jobs",
+    StartBasin: "basin_jobs",
 }
 
 

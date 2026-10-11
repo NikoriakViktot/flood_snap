@@ -12,13 +12,15 @@ import hashlib
 import json
 import logging
 import math
+import os
 import subprocess
 import urllib.request
 from pathlib import Path
 
+import shutil
+
 import numpy as np
 import rasterio
-from rasterio.merge import merge
 
 log = logging.getLogger("basin_utils")
 
@@ -141,7 +143,8 @@ def download_glo30(
         else:
             log.info("  Downloading: %s", tile_name)
             try:
-                urllib.request.urlretrieve(url, str(local_path))
+                with urllib.request.urlopen(url, timeout=120) as resp, open(local_path, "wb") as fh:
+                    shutil.copyfileobj(resp, fh, 1 << 20)
             except urllib.error.HTTPError as e:
                 if e.code == 404:
                     log.warning("  Tile not found (ocean?): %s — skipping", tile_name)
@@ -153,29 +156,19 @@ def download_glo30(
     if not tile_paths:
         raise RuntimeError("No GLO-30 tiles downloaded — check basin bbox")
 
-    # Mosaic tiles
-    if len(tile_paths) == 1:
-        mosaic_path = tile_paths[0]
-    else:
-        mosaic_path = tmp_dir / "mosaic.tif"
-        datasets = [rasterio.open(p) for p in tile_paths]
-        mosaic_data, mosaic_transform = merge(datasets)
-        profile = datasets[0].profile.copy()
-        profile.update(
-            width=mosaic_data.shape[2],
-            height=mosaic_data.shape[1],
-            transform=mosaic_transform,
-        )
-        with rasterio.open(mosaic_path, "w", **profile) as dst:
-            dst.write(mosaic_data)
-        for ds in datasets:
-            ds.close()
-        log.info("  Mosaicked %d tiles → %s", len(tile_paths), mosaic_path.name)
+    # Mosaic as a VRT (no pixels in Python memory) — gdalwarp streams it in chunks.
+    # rasterio.merge held every tile in RAM: ~577 MiB for 4 tiles, ~2.3 GB for a 2x2° region.
+    mosaic_path = tmp_dir / "mosaic.vrt"
+    subprocess.run(["gdalbuildvrt", "-q", str(mosaic_path), *[str(p) for p in tile_paths]],
+                   check=True, capture_output=True, text=True)
+    log.info("  Mosaic VRT of %d tiles → %s", len(tile_paths), mosaic_path.name)
 
     # Reproject to target CRS + clip to basin bbox + resample to target pixel size
     cmd = [
         "gdalwarp",
         "-overwrite",
+        "-wm", os.environ.get("GDAL_WARP_MEMORY_MB", "256"),
+        "-co", "COMPRESS=DEFLATE", "-co", "TILED=YES",
         "-t_srs", target_epsg,
         "-tr", str(pixel_size_m), str(pixel_size_m),
         "-r", "bilinear",
@@ -190,15 +183,13 @@ def download_glo30(
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
     # Cleanup tmp tiles (keep output)
-    import shutil
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
     # Verify
     with rasterio.open(output_dem) as src:
-        data = src.read(1)
-        valid = data[data != -9999]
+        st = src.stats(indexes=[1], approx=True)[0]
         log.info("  GLO-30 DEM: %dx%d, elev range %.0f–%.0f m",
-                 src.width, src.height, valid.min(), valid.max())
+                 src.width, src.height, st.min, st.max)
 
     return output_dem
 

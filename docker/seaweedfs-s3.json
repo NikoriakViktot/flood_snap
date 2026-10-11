@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "flood-dev",
+      "credentials": [{"accessKey": "flood", "secretKey": "flood-secret"}],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

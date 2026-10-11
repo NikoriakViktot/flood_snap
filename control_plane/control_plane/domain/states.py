@@ -30,6 +30,9 @@ class RunState(str, Enum):
     ANALYSIS_COMPLETED = "ANALYSIS_COMPLETED"   # terminal (success)
     ANALYSIS_FAILED    = "ANALYSIS_FAILED"       # terminal (failure)
 
+    # basin delineation bounded context (click → watershed → passport)
+    BASIN_RUNNING = "BASIN_RUNNING"
+
     # flood context terminals
     DONE   = "DONE"
     FAILED = "FAILED"

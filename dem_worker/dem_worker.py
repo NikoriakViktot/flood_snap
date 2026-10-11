@@ -37,6 +37,11 @@ AUX_DIR = DATA_DIR / "aux"
 STREAM_THRESHOLD = int(os.environ.get("STREAM_THRESHOLD", "1000"))
 DEM_PIXEL_SIZE = float(os.environ.get("DEM_PIXEL_SIZE", "30.0"))
 TC_EPSG = os.environ.get("TC_EPSG", "EPSG:32635")
+PRODUCTS_DIR = DATA_DIR / "products"
+# Regional DEM extent used when the contract does not pass dem_bbox: Cheremosh / upper Prut
+# (frontend AOI 24.70–25.14 E, 47.69–48.13 N) with margin so basins are not truncated.
+DEFAULT_DEM_BBOX = [float(v) for v in os.environ.get(
+    "DEFAULT_DEM_BBOX", "24.40,47.55,25.45,48.35").split(",")]
 
 
 def connect_redis() -> redis.Redis:
@@ -72,6 +77,7 @@ def process_dem_job(payload: dict, r: redis.Redis):
     run_id = payload.get("run_id")
 
     bhash = basin_hash(basin_geojson)
+    payload["_hash"] = bhash
     status_key = f"dem:{bhash}:status"
     out_dir = AUX_DIR / bhash
 
@@ -144,22 +150,104 @@ def _emit_event(r: redis.Redis, run_id: str | None, event: str, artifacts: dict)
         }))
 
 
+def process_basin_job(payload: dict, r: redis.Redis):
+    """basin.delineation.v1: terrain (cached) → watershed → passport → COGs → Terracotta → S3."""
+    from whitebox import WhiteboxTools
+
+    from basin_delineation import DelineationError, delineate
+    from terrain import ensure_terrain
+    import s3_upload
+    import tc_ingest
+
+    basin_id = payload["basin_id"]
+    run_id = payload.get("run_id")
+    progress_key = f"basin:{basin_id}:progress"
+
+    def progress(pct: int, stage: str):
+        r.set(progress_key, json.dumps({"pct": pct, "stage": stage}))
+
+    wbt = WhiteboxTools()
+    wbt.set_verbose_mode(False)
+
+    try:
+        bbox = payload.get("dem_bbox") or DEFAULT_DEM_BBOX
+        terrain = ensure_terrain(wbt, payload["dem_source"], bbox, payload["target_epsg"],
+                                 float(payload["pixel_size_m"]), progress=progress)
+        out_dir = PRODUCTS_DIR / basin_id
+        manifest = delineate(wbt, terrain, payload, out_dir, progress=progress)
+
+        progress(98, "registering tiles")
+        n_tc = tc_ingest.ingest_manifest(manifest, out_dir)
+
+        s3 = None
+        if s3_upload.enabled():
+            progress(99, "uploading to S3")
+            s3 = s3_upload.upload_basin(payload["dem_source"], basin_id, out_dir)
+            manifest["storage"] = {"s3_root": s3["root"], "objects": s3["objects"]}
+            (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+            # re-upload the manifest so the S3 copy also carries the storage block
+            s3_upload.upload_manifest(payload["dem_source"], basin_id, out_dir)
+
+        progress(100, "done")
+        _emit_event(r, run_id, "BASIN_COMPLETED", {
+            "basin_id": basin_id,
+            "manifest": str(out_dir / "manifest.json"),
+            "area_km2": manifest["stats"]["area_km2"],
+            "tc_datasets": n_tc,
+            **({"s3_root": s3["root"]} if s3 else {}),
+        })
+    except DelineationError as e:
+        log.warning("Basin %s rejected: %s", basin_id, e)
+        progress(100, "failed")
+        _emit_event(r, run_id, "FAILED", {"basin_id": basin_id, "error": str(e)})
+    except Exception as e:
+        log.exception("Basin %s failed", basin_id)
+        progress(100, "failed")
+        _emit_event(r, run_id, "FAILED", {"basin_id": basin_id, "error": f"{type(e).__name__}: {e}"})
+
+
+def _basin_child(payload: dict):
+    process_basin_job(payload, connect_redis())
+
+
+def _run_isolated(payload: dict):
+    """Run one basin job in a child process: numpy/GDAL memory is returned to the OS when it exits
+    (the long-lived worker otherwise keeps ~0.5 GB after a large basin). A hard crash or OOM kill
+    of the child is reported as FAILED instead of taking the worker down."""
+    import multiprocessing as mp
+    proc = mp.get_context("spawn").Process(target=_basin_child, args=(payload,), daemon=False)
+    proc.start()
+    proc.join()
+    if proc.exitcode != 0:
+        log.error("Basin job %s: child exited with code %s", payload.get("basin_id"), proc.exitcode)
+        r = connect_redis()
+        r.set(f"basin:{payload.get('basin_id')}:progress", json.dumps({"pct": 100, "stage": "failed"}))
+        reason = "out of memory (killed)" if proc.exitcode == -9 else f"worker process exited with code {proc.exitcode}"
+        _emit_event(r, payload.get("run_id"), "FAILED", {"basin_id": payload.get("basin_id"), "error": reason})
+
+
 def main():
+    import s3_upload
+    s3_upload.check_config()
     r = connect_redis()
-    log.info("DEM Worker ready, listening on 'dem_jobs' queue "
+    log.info("DEM Worker ready, listening on 'basin_jobs' + 'dem_jobs' "
              "(threshold=%d, pixel=%.0fm, CRS=%s) …",
              STREAM_THRESHOLD, DEM_PIXEL_SIZE, TC_EPSG)
 
     while True:
+        payload: dict = {}
         try:
-            job = r.blpop("dem_jobs", timeout=0)
-            payload = json.loads(job[1])
-            process_dem_job(payload, r)
+            queue, raw = r.blpop(["basin_jobs", "dem_jobs"], timeout=0)
+            payload = json.loads(raw)
+            if queue == "basin_jobs":
+                _run_isolated(payload)
+            else:
+                process_dem_job(payload, r)
         except Exception:
             log.exception("DEM job failed")
             try:
-                bhash = payload.get("_hash", "unknown")
-                r.set(f"dem:{bhash}:status", "error")
+                if payload.get("_hash"):
+                    r.set(f"dem:{payload['_hash']}:status", "error")
                 _emit_event(r, payload.get("run_id"), "FAILED", {
                     "error": "DEM pipeline failed"
                 })
