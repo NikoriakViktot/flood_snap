@@ -21,6 +21,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import math
 import logging
 import os
 import subprocess
@@ -134,14 +135,53 @@ class Terrain:
                 h = src.read(1, masked=True)
                 valid = h.compressed()
                 if valid.size and (valid.max() > 2000 or valid.min() < -50):
-                    raise RuntimeError(
+                    # window-level sanity only: large mountain windows legitimately exceed it;
+                    # the binding check is per basin (hand_within_relief in the manifest)
+                    log.warning(
                         f"HAND out of range ({valid.min():.0f}..{valid.max():.0f} m) — "
                         "check DEM nodata / CRS (invariant: HAND 0–50 m in the basin)")
         return p
 
 
+# Local national mosaics (scripts/national): when set, DEMs are warped from these instead of
+# being downloaded tile by tile. e.g. DEM_VRT_COPERNICUS_DEM=/data/dem/glo30/glo30_4326.vrt
+def _local_vrt(dem_source: str) -> str | None:
+    p = os.environ.get(f"DEM_VRT_{dem_source.upper()}")
+    return p if p and Path(p).exists() else None
+
+
+def _target_extent(bbox: list[float], epsg: str, res: float) -> list[float]:
+    """Envelope of a lon/lat box in the target CRS, from a densified boundary.
+
+    `gdalwarp -te_srs EPSG:4326` only transforms the corners; in conic/azimuthal projections
+    (EPSG:3035) the box edges bow outwards, so points near the edge fell outside the DEM.
+    """
+    from pyproj import Transformer
+    w, s, e, n = bbox
+    k = 64
+    lons = [w + (e - w) * i / k for i in range(k + 1)]
+    lats = [s + (n - s) * i / k for i in range(k + 1)]
+    ring = ([(x, s) for x in lons] + [(e, y) for y in lats] + [(x, n) for x in lons] + [(w, y) for y in lats])
+    tr = Transformer.from_crs("EPSG:4326", epsg, always_xy=True)
+    xs, ys = tr.transform([p[0] for p in ring], [p[1] for p in ring])
+    snap = lambda v, f: f(v / res) * res
+    return [snap(min(xs), math.floor), snap(min(ys), math.floor), snap(max(xs), math.ceil), snap(max(ys), math.ceil)]
+
+
 def _acquire_dem(dem_source: str, bbox: list[float], epsg: str, res: float, out: Path, tmp: Path) -> None:
     bbox_gj = _bbox_geojson(bbox, tmp / "bbox.geojson")
+    vrt = _local_vrt(dem_source)
+    if vrt:
+        # average when coarsening 30 m → ≥60 m, bilinear otherwise
+        _run([
+            "gdalwarp", "-overwrite", "-q", "-t_srs", epsg, "-tr", str(res), str(res),
+            "-r", "average" if res >= 60 else "bilinear", "-wm", os.environ.get("GDAL_WARP_MEMORY_MB", "256"),
+            "-te", *[str(v) for v in _target_extent(bbox, epsg, res)],
+            "-srcnodata", "-9999", "-dstnodata", "-9999",
+            "-co", "COMPRESS=DEFLATE", "-co", "TILED=YES", "-co", "BIGTIFF=IF_SAFER",
+            vrt, str(out),
+        ])
+        return
     if dem_source == "copernicus_dem":
         download_glo30(bbox_gj, out, target_epsg=epsg, pixel_size_m=res)
         return

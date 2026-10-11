@@ -152,3 +152,16 @@ def test_slope_limit_keeps_channel_and_drops_steep_banks(synthetic_terrain, tmp_
     assert lim["flood_scenarios"]["max_slope_deg"] == 8.0
     assert lim["parameters"]["max_slope_deg"] == 8.0
     assert lim["quality"]["flood_area_monotonic"]
+
+
+def test_target_extent_covers_bowed_edges():
+    """Regression: gdalwarp -te_srs 4326 only transforms corners; in EPSG:3035 the east edge of a
+    lon/lat box bows outwards and gauges near it fell outside the DEM (Irsha — Ukrainka)."""
+    from pyproj import Transformer
+    bbox = [28.08895, 50.2333, 29.46713, 51.02738]
+    xmin, ymin, xmax, ymax = terrain_mod._target_extent(bbox, "EPSG:3035", 30.0)
+    tr = Transformer.from_crs("EPSG:4326", "EPSG:3035", always_xy=True)
+    for lon, lat in [(29.358216666666667, 50.75805), (bbox[2], 50.63), (bbox[0], 50.63)]:
+        x, y = tr.transform(lon, lat)
+        assert xmin <= x <= xmax and ymin <= y <= ymax
+    assert xmin % 30 == 0 and xmax % 30 == 0

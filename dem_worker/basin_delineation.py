@@ -180,6 +180,7 @@ def delineate(wbt, terrain: Terrain, params: dict, out_dir: Path, progress=None)
             progress(pct, stage)
 
     # -- 1. outlet → cell, snap to nearest stream cell ----------------------------------------
+    write_rasters = params.get("write_rasters", True)
     step(45, "snapping outlet")
     streams_path = terrain.streams(wbt, threshold)
     hand_path = terrain.hand(wbt, threshold)
@@ -213,14 +214,30 @@ def delineate(wbt, terrain: Terrain, params: dict, out_dir: Path, progress=None)
     if not inside.any():
         raise DelineationError(f"Nearest stream cell is {dist.min():.0f} m away (> snap distance {snap_max:.0f} m)")
     rr, cc, dist = rr[inside], cc[inside], dist[inside]
-    k = int(np.argmin(dist))
+    acc_candidates = acc_win.filled(0)[rr, cc]
+    target_km2 = params.get("target_area_km2")
+    snap_method = "nearest_stream_cell"
+    if target_km2:
+        # Area-guided snapping for gauges: yearbook coordinates are often off-channel. Pick the
+        # stream cell whose upstream area best matches the official catchment area, with a mild
+        # distance penalty so that equal matches prefer the closer cell.
+        cand_km2 = np.maximum(acc_candidates, 1) * px_area / 1e6
+        score = np.abs(np.log(cand_km2 / float(target_km2))) + 0.25 * dist / snap_max
+        k = int(np.argmin(score))
+        snap_method = "area_guided(|ln(A/F)| + 0.25·d/dmax)"
+    else:
+        k = int(np.argmin(dist))
     srow, scol = int(rr[k] + r0), int(cc[k] + c0)
     snap_dist = float(dist[k])
     acc_req = float(acc_win[row - r0, col - c0]) if not acc_win.mask[row - r0, col - c0] else None
     acc_snap = float(acc_win[rr[k], cc[k]])
-    acc_candidates = acc_win.filled(0)[rr, cc]
     snap_warning = None
-    if acc_candidates.max() > 3 * acc_snap:
+    if target_km2:
+        ratio = acc_snap * px_area / 1e6 / float(target_km2)
+        if not 0.8 <= ratio <= 1.25:
+            snap_warning = (f"best stream cell within {snap_max:.0f} m drains {ratio:.2f}× the official "
+                            f"catchment area — check gauge coordinates or the DEM")
+    elif acc_candidates.max() > 3 * acc_snap:
         snap_warning = (f"A larger channel (flow accumulation {int(acc_candidates.max())} cells vs "
                         f"{int(acc_snap)} at the snapped cell) lies within the snap radius — verify the outlet")
     sx, sy = rasterio.transform.xy(acc_full_transform, srow, scol)
@@ -421,8 +438,9 @@ def delineate(wbt, terrain: Terrain, params: dict, out_dir: Path, progress=None)
         prev_area = a_km2
 
         name = f"flood_{L}m"
-        utm = _write(out_dir / "analysis" / f"{name}.tif", np.ma.masked_invalid(depth), ctransform, crs, -9999, "float32")
-        cog = _cog_3857(utm, out_dir / "tiles" / f"{name}.tif", "bilinear")
+        if write_rasters:
+            utm = _write(out_dir / "analysis" / f"{name}.tif", np.ma.masked_invalid(depth), ctransform, crs, -9999, "float32")
+            _cog_3857(utm, out_dir / "tiles" / f"{name}.tif", "bilinear")
         ext_rel = None
         geom = _polygonize(connected, ctransform, simplify_m=res / 2, min_area_m2=4 * px_area)
         if geom is not None:
@@ -437,7 +455,8 @@ def delineate(wbt, terrain: Terrain, params: dict, out_dir: Path, progress=None)
             "n_cells": int(connected.sum()),
             "slope_cells_removed": int((below & ~slope_ok).sum()),
             "isolated_cells_removed": int((wet & ~connected).sum()),
-            "depth_cog": f"tiles/{name}.tif", "depth_tif": f"analysis/{name}.tif", "extent_geojson": ext_rel,
+            "depth_cog": f"tiles/{name}.tif" if write_rasters else None,
+            "depth_tif": f"analysis/{name}.tif" if write_rasters else None, "extent_geojson": ext_rel,
         })
         flood_products.append({"level_m": L, "tc_layer": f"{dem_src}_{basin_id}_hand_{threshold}_flood_{L}m",
                                "cog": f"tiles/{name}.tif"})
@@ -466,6 +485,8 @@ def delineate(wbt, terrain: Terrain, params: dict, out_dir: Path, progress=None)
                         {"explicit_color_map": urllib.parse.quote('{"1":[167,139,250]}')}))
 
     products = []
+    if not write_rasters:
+        rasters = []
     for stem, arr, dtype, nodata, resamp, kind, name, cat, cmap, stretch, units, extra in rasters:
         utm = _write(out_dir / "analysis" / f"{stem}.tif", arr, ctransform, crs, nodata, dtype)
         cog = _cog_3857(utm, out_dir / "tiles" / f"{stem}.tif", resamp)
@@ -479,7 +500,8 @@ def delineate(wbt, terrain: Terrain, params: dict, out_dir: Path, progress=None)
                           "mean": round(float(valid.mean()), 2)}
         products.append(p)
 
-    products.append({
+    if write_rasters:
+        products.append({
         "kind": "flood_depth", "name": f"HAND inundation depth · {terrain.meta.get('label', dem_src)}",
         "tc_category": "flood_scenarios",
         "tc_layer": flood_products[0]["tc_layer"],
@@ -487,7 +509,7 @@ def delineate(wbt, terrain: Terrain, params: dict, out_dir: Path, progress=None)
         "cog": flood_products[0]["cog"], "datasets": flood_products,
         "colormap": "blues", "stretch_range": [0, 5], "units": "m", "crs_tiles": "EPSG:3857",
         "stats": {"hand_stream_threshold": threshold},
-    })
+        })
 
     # -- vectors ---------------------------------------------------------------------------------
     step(94, "vectors")
@@ -546,7 +568,7 @@ def delineate(wbt, terrain: Terrain, params: dict, out_dir: Path, progress=None)
             "conditioning": "breach_depressions(fill_pits=True)",
             "flow_routing": "D8",
             "stream_definition": f"flow accumulation >= {threshold} cells",
-            "outlet_snapping": "nearest stream cell within snap_distance_m (Jenson); flow-accumulation maximum NOT used",
+            "outlet_snapping": snap_method + " among stream cells within snap_distance_m; plain flow-accumulation maximum is NOT used",
             "hand": "elevation_above_stream (WhiteboxTools)",
             "slope": "Horn 3x3, degrees",
             "flood_scenarios": HAND_DISCLAIMER,
@@ -572,6 +594,9 @@ def delineate(wbt, terrain: Terrain, params: dict, out_dir: Path, progress=None)
             "actual_snap_distance_m": round(snap_dist, 1),
             "flow_acc_requested": int(acc_req) if acc_req is not None else None,
             "flow_acc_snapped": int(acc_snap),
+            "snap_method": snap_method,
+            "official_area_km2": target_km2,
+            "area_ratio_to_official": round(n_cells * px_area / 1e6 / float(target_km2), 4) if target_km2 else None,
             "snap_warning": snap_warning,
         },
         "stats": stats,
