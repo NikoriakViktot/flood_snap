@@ -2,9 +2,11 @@
 National HAND at 30 m for one DEM, river-basin district by district (16 districts of data/ukraine_basins.geojson).
 
 Per district (EPSG:3035, 30 m, district + 3 km buffer so channels at the edge keep their catchment):
-  dem.tif → breach_depressions(fill_pits) → d8_pointer → d8_flow_accumulation (cells) → extract_streams (≥ THRESHOLD)
+  dem.tif → breach_depressions(fill_pits, flat_increment=0.001) → d8_pointer → d8_flow_accumulation (cells) → extract_streams (≥ THRESHOLD)
   → elevation_above_stream = HAND (m), clipped to the district itself (districts do not overlap in the mosaic).
-Same WhiteboxTools steps as dem_worker/terrain.py; threshold 2000 cells (≈1.8 km² at 30 m) as the existing hand_2000
+Same WhiteboxTools steps as dem_worker/terrain.py, plus flat_increment: without it breach_depressions carved the
+district DEMs down to −2589 m (Prut) and HAND reached thousands of metres; flat water (rivers, reservoirs) also broke
+the D8 flow. Threshold 2000 cells (≈1.8 km² at 30 m) as the existing hand_2000
 masks. Resumable: a district that already has hand.tif is skipped.
 
 District cut lines (EPSG:3035, with and without the 3 km buffer) are prepared on the host, because the worker image
@@ -44,7 +46,7 @@ def district(a, d: dict, cuts: Path, work: Path, out: Path) -> dict:
     import whitebox
     w = whitebox.WhiteboxTools()
     w.set_verbose_mode(False)
-    steps = [("breach_depressions", lambda: w.breach_depressions(str(dem), str(br), fill_pits=True)),
+    steps = [("breach_depressions", lambda: w.breach_depressions(str(dem), str(br), fill_pits=True, flat_increment=0.001)),
              ("d8_pointer", lambda: w.d8_pointer(str(br), str(d8))),
              ("d8_flow_accumulation", lambda: w.d8_flow_accumulation(str(br), str(acc), out_type="cells")),
              ("extract_streams", lambda: w.extract_streams(str(acc), str(st), threshold=a.threshold, zero_background=False)),
