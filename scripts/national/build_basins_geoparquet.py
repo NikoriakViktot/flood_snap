@@ -36,10 +36,10 @@ def passport_row(pid: str, m: dict, geom, dem: str) -> dict:
     failed = [c["name"] for c in q.get("checks", []) if not c.get("ok")]
     status = m.get("status", "ok")
     g = m.get("gauge", {})
-    official = g.get("official_area_km2") or o.get("official_area_km2")
-    ratio = o.get("area_ratio_to_official")
-    if ratio is None and official:
-        ratio = round(st["area_km2"] / official, 4)
+    # gauge.official_area_km2 is the yearbook F; outlet.official_area_km2 may hold the 90 m area that
+    # was only used as a snapping target for gauges without F — never report that as "official"
+    official = g.get("official_area_km2") if g else o.get("official_area_km2")
+    ratio = round(st["area_km2"] / official, 4) if official else None
     flag = q.get("flag") or ("outside_dem_coverage" if status == "outside_dem_coverage" else
                              "area_mismatch" if ratio and not 0.9 <= ratio <= 1.1 else
                              "no_official_area" if not official else "ok")
