@@ -59,7 +59,7 @@ def run_dem_pipeline(
 
     # --- Step 1: Breach depressions ---
     log.info("WBT step 1/6: breach_depressions")
-    ret = wbt.breach_depressions(str(dem_tif), breached, fill_pits=True)
+    ret = wbt.breach_depressions(str(dem_tif), breached, fill_pits=True, flat_increment=0.001)
     if ret != 0:
         raise RuntimeError(f"breach_depressions failed (code {ret})")
 
