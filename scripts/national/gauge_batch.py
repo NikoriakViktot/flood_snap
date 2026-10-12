@@ -60,7 +60,9 @@ def one(row: dict, dem: str, out_root: str) -> dict:
         m = json.loads((out_dir / "manifest.json").read_text())
         return {**res, **summary(m), "status": "cached", "seconds": 0}
 
-    T.TERRAIN_DIR = Path(out_root) / "_terrain"
+    # one terrain dir per gauge: gauges on the same river can share a window (same cache key),
+    # and a finished worker deleting the shared terrain broke the others mid-run
+    T.TERRAIN_DIR = Path(out_root) / "_terrain" / f"post_id_{pid}"
     official = float(row["official_km2"]) if row["official_km2"] else None
     a90 = float(row["area_90m_km2"])
     target = official or a90
@@ -84,9 +86,15 @@ def one(row: dict, dem: str, out_root: str) -> dict:
     terr = None
     try:
         terr = T.ensure_terrain(wbt, dem, bbox, EPSG, RES)
+        # When the 90 m pass already matched the official area, start from its snapped outlet: it is
+        # on the right channel even where the yearbook coordinates sit > 1 km from it.
+        out_lon, out_lat, outlet_source = float(row["lon"]), float(row["lat"]), "gauge_coordinates"
+        if row.get("snap_lon") and ratio90 and 0.8 <= ratio90 <= 1.25:
+            out_lon, out_lat = float(row["snap_lon"]), float(row["snap_lat"])
+            outlet_source = "national_90m_snapped_outlet"
         params = {
             "basin_id": letters(pid), "run_id": f"national-{dem}", "project_id": None,
-            "outlet_lon": float(row["lon"]), "outlet_lat": float(row["lat"]),
+            "outlet_lon": out_lon, "outlet_lat": out_lat,
             "snap_distance_m": SNAP_M, "stream_threshold": stream_threshold(target),
             "hand_threshold_m": 5.0, "max_slope_deg": 8.0, "flood_levels_m": LEVELS,
             "cn_grid_tif": None, "target_area_km2": target,
@@ -96,6 +104,8 @@ def one(row: dict, dem: str, out_root: str) -> dict:
         m["gauge"] = {"post_id": pid, "name": row["name"], "river": row["river"], "basin_code": row["basin_code"],
                       "official_area_km2": official, "area_90m_km2": a90,
                       "target_area_source": "official" if official else "national_90m",
+                      "gauge_coordinates": [float(row["lon"]), float(row["lat"])],
+                      "outlet_search_from": outlet_source,
                       "source": "hydro-ua /v1/hydro/stations"}
         (out_dir / "manifest.json").write_text(json.dumps(m, indent=2, ensure_ascii=False))
         return {**res, **summary(m), "status": "ok", "seconds": round(time.time() - t0, 1)}

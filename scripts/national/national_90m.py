@@ -261,9 +261,13 @@ def main():
                                                        "area_90m_km2", "area_ratio", "flag", "tier", "snap_m")}})
 
     (out / "basins_90m.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
+    for s in snaps:
+        if s["status"] == "ok":
+            x, y = rasterio.transform.xy(transform, s["row"], s["col"])
+            s["snap_lon"], s["snap_lat"] = (round(v, 6) for v in to_wgs(x, y))
     cols = ["post_id", "name", "river", "basin_code", "lon", "lat", "status", "official_km2", "area_90m_km2",
-            "area_ratio", "flag", "tier", "snap_m", "snap_method", "acc_km2_at_snap", "outlet_id",
-            "parent_outlet", "n_upstream_outlets", "bbox_wgs84"]
+            "area_ratio", "flag", "tier", "snap_m", "snap_method", "acc_km2_at_snap", "row", "col",
+            "snap_lon", "snap_lat", "outlet_id", "parent_outlet", "n_upstream_outlets", "bbox_wgs84"]
     with open(out / "gauges_90m.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
