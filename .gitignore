@@ -245,3 +245,4 @@ __marimo__/
 !tests/**/*.tif
 !.env.example
 *.aux.xml
+deploy/server/lab.env

@@ -13,8 +13,12 @@ District cut lines (EPSG:3035, with and without the 3 km buffer) are prepared on
 has GDAL and WhiteboxTools but no geopandas:  data/national/_districts/{<slug>.geojson, <slug>_buf.geojson, index.json}
 
   docker run --rm -v ./data:/data -v ./scripts:/scripts projects-dem_worker \
-    python3 /scripts/national/national_hand.py --dem fab_dem [--only 5_3_3]
-Outputs: data/national/<dem>/hand_2000/<slug>/{hand.tif, streams.tif, run.json}
+    python3 /scripts/national/national_hand.py --dem fab_dem [--only 5_3_3] [--terrain-only]
+Outputs: data/national/<dem>/hand_2000/<slug>/{hand.tif, streams.tif, d8.tif, dem.tif, run.json}
+  d8.tif   WhiteboxTools D8 pointer (Byte 1..128, nodata 0) of the breached DEM: the Flood Lab delineates a basin
+           from any outlet with it (lab_service), no terrain work on the server.
+  dem.tif  the warped DEM as Int16 metres (nodata -32768) for relief / hypsometry of a basin.
+--terrain-only: for districts that already have hand.tif, add the missing d8.tif / dem.tif (warp + breach + pointer).
 """
 from __future__ import annotations
 
@@ -35,6 +39,14 @@ def sh(*args: str) -> None:
     subprocess.run(list(args), check=True)
 
 
+def _clip(a, d: dict, cuts: Path, out: Path, items) -> None:
+    """Cut work rasters to the unbuffered district: (src, name, nodata, extra gdalwarp args)."""
+    for src, name, nodata, extra in items:
+        tmp = out / f"{name}.tmp.tif"
+        sh("gdalwarp", "-q", "-overwrite", "-cutline", str(cuts / f"{d['slug']}.geojson"), "-dstnodata", nodata, *extra, *CO, str(src), str(tmp))
+        tmp.replace(out / name)
+
+
 def district(a, d: dict, cuts: Path, work: Path, out: Path) -> dict:
     t0 = time.time()
     work.mkdir(parents=True, exist_ok=True)
@@ -46,23 +58,31 @@ def district(a, d: dict, cuts: Path, work: Path, out: Path) -> dict:
     import whitebox
     w = whitebox.WhiteboxTools()
     w.set_verbose_mode(False)
+    terrain_only = a.terrain_only and (out / "hand.tif").exists()
     steps = [("breach_depressions", lambda: w.breach_depressions(str(dem), str(br), fill_pits=True, flat_increment=0.001)),
-             ("d8_pointer", lambda: w.d8_pointer(str(br), str(d8))),
-             ("d8_flow_accumulation", lambda: w.d8_flow_accumulation(str(br), str(acc), out_type="cells")),
-             ("extract_streams", lambda: w.extract_streams(str(acc), str(st), threshold=a.threshold, zero_background=False)),
-             ("elevation_above_stream", lambda: w.elevation_above_stream(str(br), str(st), str(hand)))]
+             ("d8_pointer", lambda: w.d8_pointer(str(br), str(d8)))]
+    if not terrain_only:
+        steps += [("d8_flow_accumulation", lambda: w.d8_flow_accumulation(str(br), str(acc), out_type="cells")),
+                  ("extract_streams", lambda: w.extract_streams(str(acc), str(st), threshold=a.threshold, zero_background=False)),
+                  ("elevation_above_stream", lambda: w.elevation_above_stream(str(br), str(st), str(hand)))]
     times = {}
     for name, fn in steps:
         s = time.time()
         if fn() != 0:
             raise RuntimeError(f"{d['code']}: WhiteboxTools {name} failed")
         times[name] = round(time.time() - s, 1)
-    for src, name, nodata in ((hand, "hand.tif", "-9999"), (st, "streams.tif", "0")):
-        tmp = out / f"{name}.tmp.tif"
-        sh("gdalwarp", "-q", "-overwrite", "-cutline", str(cuts / f"{d['slug']}.geojson"), "-dstnodata", nodata, *CO, str(src), str(tmp))
-        tmp.replace(out / name)
-    run = {"district": d["code"], "name_ua": d["name_ua"], "km2": d["km2"], "dem": a.dem, "threshold_cells": a.threshold,
-           "crs": EPSG, "res_m": RES, "buffer_m": 3000, "seconds": round(time.time() - t0, 1), "steps_s": times,
+    items = [(d8, "d8.tif", "0", ["-ot", "Byte", "-r", "near"]),
+             (dem, "dem.tif", "-32768", ["-ot", "Int16", "-r", "near", "-srcnodata", "-9999"])]
+    if not terrain_only:
+        items = [(hand, "hand.tif", "-9999", []), (st, "streams.tif", "0", [])] + items
+    _clip(a, d, cuts, out, items)
+    prev = json.loads((out / "run.json").read_text()) if terrain_only and (out / "run.json").exists() else {}
+    run = {**prev, "district": d["code"], "name_ua": d["name_ua"], "km2": d["km2"], "dem": a.dem, "threshold_cells": a.threshold,
+           "crs": EPSG, "res_m": RES, "buffer_m": 3000, "seconds": round(time.time() - t0, 1),
+           "steps_s": {**prev.get("steps_s", {}), **times}, "terrain_version": "v1",
+           "files": {"hand.tif": {"dtype": "float32", "units": "m", "nodata": -9999}, "streams.tif": {"dtype": "uint8", "nodata": 0},
+                     "d8.tif": {"dtype": "uint8", "encoding": "wbt_d8_pointer", "nodata": 0},
+                     "dem.tif": {"dtype": "int16", "units": "m", "nodata": -32768}},
            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     (out / "run.json").write_text(json.dumps(run, ensure_ascii=False, indent=1))
     shutil.rmtree(work, ignore_errors=True)
@@ -75,6 +95,7 @@ def main():
     ap.add_argument("--threshold", type=int, default=2000)
     ap.add_argument("--root", default="/data/national")
     ap.add_argument("--only", default="", help="comma list of district slugs (e.g. 5_3_3,M5_2)")
+    ap.add_argument("--terrain-only", action="store_true", help="add d8.tif / dem.tif to districts that already have hand.tif")
     a = ap.parse_args()
     cuts = Path(a.root) / "_districts"
     only = {c.strip() for c in a.only.split(",") if c.strip()}
@@ -83,7 +104,8 @@ def main():
         if only and d["slug"] not in only:
             continue
         out = base / d["slug"]
-        if (out / "hand.tif").exists():
+        done = (out / "hand.tif").exists() and (not a.terrain_only or (out / "d8.tif").exists() and (out / "dem.tif").exists())
+        if done:
             print(f"skip {d['code']} (done)", flush=True)
             continue
         print(f"{d['code']} {d['name_ua']} {d['km2']:,} km² …", flush=True)

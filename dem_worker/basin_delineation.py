@@ -42,7 +42,7 @@ from terrain import Terrain
 
 log = logging.getLogger("basin")
 
-METHOD_VERSION = "basin.delineation.v1 / wbt-d8-hand-v1"
+METHOD_VERSION = "basin.delineation.v2 / wbt-d8-hand-v2"   # v2: breach_depressions with flat_increment=0.001
 HAND_DISCLAIMER = (
     "hand_inundation_scenario: relative water-level scenario (depth = level − HAND) for cells below "
     "the slope limit and hydrologically connected to the drainage network. Not a hydrodynamic flood prediction: "
@@ -565,7 +565,7 @@ def delineate(wbt, terrain: Terrain, params: dict, out_dir: Path, progress=None)
         "created_at": datetime.now(timezone.utc).isoformat(),
         "method": {
             "version": METHOD_VERSION,
-            "conditioning": "breach_depressions(fill_pits=True)",
+            "conditioning": "breach_depressions(fill_pits=True, flat_increment=0.001)",
             "flow_routing": "D8",
             "stream_definition": f"flow accumulation >= {threshold} cells",
             "outlet_snapping": snap_method + " among stream cells within snap_distance_m; plain flow-accumulation maximum is NOT used",

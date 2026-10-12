@@ -82,7 +82,7 @@ def build_terrain(dem_source: str, out: Path, timings: dict):
              "-co", "COMPRESS=DEFLATE", "-co", "TILED=YES", "-co", "BIGTIFF=YES", VRT[dem_source], str(dem)])
         timings["warp_s"] = round(time.time() - t, 1)
     for name, path, fn in (
-        ("breach_depressions", br, lambda: wbt.breach_depressions(str(dem), str(br), fill_pits=True)),
+        ("breach_depressions", br, lambda: wbt.breach_depressions(str(dem), str(br), fill_pits=True, flat_increment=0.001)),
         ("d8_pointer", d8, lambda: wbt.d8_pointer(str(br), str(d8))),
         ("d8_flow_accumulation", acc, lambda: wbt.d8_flow_accumulation(str(br), str(acc), out_type="cells")),
     ):

@@ -74,7 +74,7 @@ def main():
                 "method": {
                     "version": "national_90m / wbt-d8-v1",
                     "note": "large basin kept at 90 m (EPSG:3035 equal area); no HAND scenarios at this scale",
-                    "conditioning": "breach_depressions(fill_pits=True)", "flow_routing": "D8",
+                    "conditioning": "breach_depressions(fill_pits=True, flat_increment=0.001)", "flow_routing": "D8",
                     "outlet_snapping": r["snap_method"],
                 },
                 "dem": {"source": a.dem, "processing_crs": EPSG, "grid_resolution_m": 90,

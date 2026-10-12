@@ -227,7 +227,7 @@ def ensure_terrain(wbt, dem_source: str, bbox: list[float], epsg: str, res: floa
 
             wbt.set_working_dir(str(tdir))
             if progress: progress(15, "breaching depressions")
-            _wbt(wbt, "breach_depressions", wbt.breach_depressions(str(t.dem), str(t.breached), fill_pits=True))
+            _wbt(wbt, "breach_depressions", wbt.breach_depressions(str(t.dem), str(t.breached), fill_pits=True, flat_increment=0.001))
             if progress: progress(25, "D8 flow direction")
             _wbt(wbt, "d8_pointer", wbt.d8_pointer(str(t.breached), str(t.d8)))
             if progress: progress(30, "D8 flow accumulation")

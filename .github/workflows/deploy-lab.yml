@@ -1,0 +1,25 @@
+name: Deploy Flood Lab (geoproc)
+
+on:
+  push:
+    branches: [main]
+    paths: ["lab_service/**", "dem_worker/**", "deploy/server/docker-compose.lab.yml", ".github/workflows/deploy-lab.yml"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the DEM worker base image
+        run: docker build -t projects-dem_worker dem_worker
+      - name: Build and start geoproc + worker
+        run: |
+          test -f /home/ubuntu/flood_lab/lab.env || { echo "::error::/home/ubuntu/flood_lab/lab.env is missing (see deploy/server/lab.env.example)"; exit 1; }
+          cp /home/ubuntu/flood_lab/lab.env deploy/server/lab.env
+          sudo mkdir -p /data/lab && sudo chown 0:0 /data/lab
+          docker compose -f deploy/server/docker-compose.lab.yml up -d --build
+      - name: Health
+        run: |
+          for i in $(seq 1 20); do docker exec $(docker ps -qf name=geoproc-1 | head -1) python3 -c "import urllib.request,sys;print(urllib.request.urlopen('http://localhost:8000/internal/health',timeout=5).read().decode())" && exit 0; sleep 5; done
+          exit 1

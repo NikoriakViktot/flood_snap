@@ -54,7 +54,7 @@ def main():
     gdal("sh", "-c", f"gdalbuildvrt -q -overwrite /data/dem_display/_tmp/{a.dem}_hand.vrt {base}/*/hand.tif && "
                      f"gdalbuildvrt -q -overwrite /data/dem_display/_tmp/{a.dem}_streams.vrt {base}/*/streams.tif")
     co = ["-co", "TILED=YES", "-co", "COMPRESS=DEFLATE", "-co", "BIGTIFF=YES", "-multi", "-wo", "NUM_THREADS=8", "-wm", "4096"]
-    gdal("gdalwarp", "-q", "-overwrite", "-t_srs", "EPSG:3857", "-tr", "30", "30", "-r", "bilinear", "-srcnodata", "-9999",
+    gdal("gdalwarp", "-q", "-overwrite", "-t_srs", "EPSG:3857", "-tr", "30", "30", "-r", "near", "-srcnodata", "-9999",
          "-dstnodata", "-9999", "-ot", "Float32", *co, f"/data/dem_display/_tmp/{a.dem}_hand.vrt", f"/data/dem_display/_tmp/{a.dem}_hand_3857.tif")
     gdal("gdalwarp", "-q", "-overwrite", "-t_srs", "EPSG:3857", "-tr", "30", "30", "-r", "max", "-srcnodata", "0",
          "-dstnodata", "0", "-ot", "Byte", *co, f"/data/dem_display/_tmp/{a.dem}_streams.vrt", f"/data/dem_display/_tmp/{a.dem}_streams_3857.tif")

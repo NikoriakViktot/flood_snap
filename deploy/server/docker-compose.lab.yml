@@ -1,0 +1,35 @@
+# Flood Lab geoprocessing on the production server (next to the platform, on the shared docker network geoai_web).
+# Django reaches it as http://geoproc:8000 (GEOPROC_API_URL); it posts callbacks to http://platform-api:8000.
+# Terrain comes from S3 (hydro/lake/national_terrain/v1) through the instance role into /data/lab/cache.
+#   docker compose -f deploy/server/docker-compose.lab.yml --env-file deploy/server/lab.env up -d --build
+services:
+  geoproc:
+    build: { context: ../.., dockerfile: lab_service/Dockerfile }
+    image: geohydroai-lab:latest
+    command: ["uvicorn", "lab_service.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    env_file: lab.env
+    volumes: ["/data/lab:/data/lab"]
+    networks: { web: { aliases: [geoproc] } }
+    mem_limit: 512m
+    cpus: 0.5
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/internal/health',timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  geoproc-worker:
+    image: geohydroai-lab:latest
+    depends_on: [geoproc]
+    command: ["python3", "-m", "lab_service.worker"]
+    env_file: lab.env
+    volumes: ["/data/lab:/data/lab"]
+    networks: [web]
+    mem_limit: 2560m       # the watershed child gets CHILD_MEM_GB=2.0; the website keeps the rest
+    cpus: 1.0
+    restart: unless-stopped
+
+networks:
+  web:
+    external: true
+    name: geoai_web
