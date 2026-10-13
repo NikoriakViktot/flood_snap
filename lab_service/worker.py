@@ -48,12 +48,21 @@ def _child(job: dict, out_dir: str, conn) -> None:
         a = runs[primary]
         by_dem = {d: runs[d]["stats"] for d in settings.DEMS}
         comparison = P.compare(a, runs[others[0]]) if others else None
+        # the national terrain has ONE stream network (STREAM_THRESHOLD_CELLS); say so instead of silently ignoring
+        # a different request (code audit 2026-10-13)
+        requested = p.get("stream_threshold") or "medium"
+        if requested != settings.STREAM_THRESHOLD_PRESET:
+            for d in by_dem:
+                by_dem[d].setdefault("quality", {"edge_touch": False, "warnings": []})["warnings"].append(
+                    f"stream_threshold '{requested}' was not applied: the national terrain has one stream network "
+                    f"({settings.STREAM_THRESHOLD_CELLS} cells, '{settings.STREAM_THRESHOLD_PRESET}')")
         for d, r in runs.items():
             (Path(out_dir) / f"basin_{d}.geojson").write_text(json.dumps({"type": "Feature", "properties": {"dem": d, **r["stats"]}, "geometry": r["basin"]}, ensure_ascii=False))
         result = {"basin": a["basin"], "snapped_outlet": a["snapped_outlet"],
                   "stats": {"method": settings.METHOD, "region": p["region"], "district_slug": p["district_slug"], "district_name_ua": p.get("district_name_ua"),
                             "primary_dem": primary, "stream_threshold_cells": settings.STREAM_THRESHOLD_CELLS,
-                            "stream_threshold": p.get("stream_threshold"), "snap_distance_m": a["stats"]["snap_distance_m"],
+                            "stream_threshold": p.get("stream_threshold"), "stream_threshold_applied": settings.STREAM_THRESHOLD_PRESET,
+                            "snap_distance_m": a["stats"]["snap_distance_m"],
                             "levels_preview": p.get("hand_threshold"), **{k: a["stats"][k] for k in ("area_km2", "relief_m", "main_channel_km") if k in a["stats"]},
                             "by_dem": by_dem, "comparison": comparison}}
         (Path(out_dir) / "result.json").write_text(json.dumps(result, ensure_ascii=False))

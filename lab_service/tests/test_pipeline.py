@@ -72,6 +72,21 @@ def test_run_one_statistics_and_polygon(district, tmp_path):
     assert c["iou"] == pytest.approx(1.0) and c["area_ratio_fab_to_cop"] == 1.0
 
 
+def test_compare_direction_does_not_follow_the_primary():
+    """area_ratio_fab_to_cop is FAB/COP even when Copernicus is the primary DEM."""
+    from shapely.geometry import box
+    fab = {"dem": "fab_dem", "basin_3035": box(0, 0, 2, 1), "basin_simplified": None,
+           "stats": {"area_km2": 2.0, "relief_m": 100, "flood_levels": [{"level_m": 1, "area_km2": 0.5}]}}
+    cop = {"dem": "copernicus_dem", "basin_3035": box(0, 0, 1, 1), "basin_simplified": "cop-outline",
+           "stats": {"area_km2": 1.0, "relief_m": 90, "flood_levels": [{"level_m": 1, "area_km2": 0.2}]}}
+    for primary, secondary in ((fab, cop), (cop, fab)):
+        c = P.compare(primary, secondary)
+        assert c["area_ratio_fab_to_cop"] == 2.0 and c["relief_diff_m"] == 10
+        assert c["flood_area_diff_km2"][0]["diff_km2"] == pytest.approx(0.3)
+        assert c["iou"] == pytest.approx(0.5) and c["primary_dem"] == primary["dem"]
+    assert P.compare(cop, fab)["secondary_basin"] is None and P.compare(fab, cop)["secondary_basin"] == "cop-outline"
+
+
 def test_basin_too_large(district, tmp_path, monkeypatch):
     whitebox = pytest.importorskip("whitebox")
     from lab_service import settings

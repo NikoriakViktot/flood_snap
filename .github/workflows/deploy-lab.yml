@@ -55,6 +55,12 @@ jobs:
             ${{ steps.meta.outputs.base }}:latest
           cache-from: type=gha,scope=dem_worker
           cache-to: type=gha,scope=dem_worker,mode=min
+      # the Lab tests need GDAL/WhiteboxTools: run them in the base image just pushed (pytest.ini testpaths include
+      # lab_service/tests since the 2026-10-13 audit); a failure stops the deploy before the lab image is built
+      - name: Lab tests in the base image
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w --entrypoint sh "${{ steps.meta.outputs.base }}:${{ github.sha }}" -c \
+            "pip install -q 'fastapi==0.115.*' 'uvicorn[standard]==0.30.*' 'pyjwt==2.9.*' boto3 redis httpx pytest fakeredis && python3 -m pytest -q -p no:cacheprovider lab_service/tests"
       - name: Build and push the lab image
         uses: docker/build-push-action@v6
         with:
