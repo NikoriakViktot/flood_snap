@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "geoproc/job_event.v1",
+  "title": "platform.geoproc_event task kwargs",
+  "description": "Canonical copy: geoai-django contracts/geoproc/job_event.v1.json. Sent by a geoprocessing worker to the platform queue after every state change.",
+  "type": "object",
+  "required": ["job_id", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {"type": "string"},
+    "payload": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["running", "done", "failed"]},
+        "progress_pct": {"type": "integer", "minimum": 0, "maximum": 100},
+        "stage": {"type": ["string", "null"]},
+        "error": {"type": ["string", "null"]},
+        "result_ref": {"type": ["string", "null"]},
+        "result": {
+          "type": ["object", "null"],
+          "properties": {"basin": {"type": "object"}, "snapped_outlet": {"type": "object"}, "stats": {"type": "object"}}
+        },
+        "products": {"type": "array"}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "done"}}}, "then": {"required": ["result"], "properties": {"result": {"type": "object", "required": ["basin", "stats"]}}}},
+        {"if": {"properties": {"status": {"const": "failed"}}}, "then": {"required": ["error"], "properties": {"error": {"type": "string"}}}}
+      ]
+    }
+  }
+}

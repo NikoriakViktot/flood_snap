@@ -1,5 +1,11 @@
 # Flood Lab geoprocessing (`geoproc` + `geoproc-worker`) — Specification (v1)
 
+> **Transport (2026-10-13): Celery.** `geoproc-worker` is a Celery worker of the platform (`lab_service/tasks.py`,
+> queue `geoproc` on the platform broker). Django owns the job and sends `geoproc.basin_delineation(job_id, params)`;
+> the worker reports each state change as `platform.geoproc_event(job_id, payload)`. Contracts:
+> `lab_service/contracts/*.json` (canonical copies in geoai-django `contracts/geoproc/`). The HTTP API, Redis list and
+> callbacks described below are the legacy transport, kept until `GEOPROC_TRANSPORT=celery` is live, then removed.
+
 ## 1. Purpose
 
 The Flood Lab service delineates a **river basin above an outlet** on the national terrain

@@ -18,10 +18,17 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+  # Celery worker of the platform (lab_service/tasks.py): queue `geoproc` on the platform broker (redis db 0); events go
+  # back as platform.geoproc_event. Django sends here when GEOPROC_TRANSPORT=celery. The legacy loop
+  # (python3 -m lab_service.worker: Redis list + HTTP callbacks) and the geoproc API above stay until that switch is done.
   geoproc-worker:
     image: geohydroai-lab:latest
-    depends_on: [geoproc]
-    command: ["python3", "-m", "lab_service.worker"]
+    command: ["celery", "-A", "lab_service.tasks", "worker", "-Q", "geoproc", "-c", "1", "--prefetch-multiplier", "1", "-n", "lab@%h", "--loglevel", "INFO"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A lab_service.tasks inspect ping -d lab@$$HOSTNAME --timeout 10 | grep -q pong"]
+      interval: 120s
+      timeout: 30s
+      retries: 3
     env_file: lab.env
     volumes: ["/data/lab:/data/lab"]
     networks: [web]
