@@ -7,7 +7,10 @@ payload)` on the platform queue — no HTTP callback, no callback token, no job 
 Contracts: contracts/basin_delineation.v1.json (task input) and contracts/job_event.v1.json (event payload); the
 canonical copies live in geoai-django contracts/geoproc/.
 
-  celery -A lab_service.tasks worker -Q geoproc -c 1 --prefetch-multiplier 1 -n lab@%h
+  celery -A lab_service.tasks worker -Q geoproc -P solo --prefetch-multiplier 1 -n lab@%h
+
+`-P solo`: the task runs in the worker's main process, which then starts the memory-limited pipeline child itself
+(the default prefork pool runs tasks in daemonic processes, which may not have children).
 """
 from __future__ import annotations
 
@@ -51,4 +54,10 @@ def basin_delineation(job_id: str, params: dict) -> str:
                       "result_ref": None, "result": None, "products": []})
         return "failed"
     out_dir = JobStore().out_dir(job_id)
-    return execute({"job_id": job_id, "params": prepared}, str(out_dir), lambda body: emit(job_id, body))["status"]
+    try:
+        return execute({"job_id": job_id, "params": prepared}, str(out_dir), lambda body: emit(job_id, body))["status"]
+    except Exception as e:  # noqa: BLE001  never leave the platform's job 'running' on an unexpected error
+        log.exception("job %s crashed", job_id)
+        emit(job_id, {"status": "failed", "progress_pct": 100, "stage": "crashed", "error": f"{type(e).__name__}: {e}",
+                      "result_ref": None, "result": None, "products": []})
+        return "failed"
