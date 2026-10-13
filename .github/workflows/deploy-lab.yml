@@ -30,23 +30,29 @@ jobs:
       packages: write
     outputs:
       image: ${{ steps.meta.outputs.image }}
+      base: ${{ steps.meta.outputs.base }}
     steps:
       - uses: actions/checkout@v4
       - id: meta
-        run: echo "image=$REGISTRY/${GITHUB_REPOSITORY_OWNER,,}/$IMAGE" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "image=$REGISTRY/${GITHUB_REPOSITORY_OWNER,,}/$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "base=$REGISTRY/${GITHUB_REPOSITORY_OWNER,,}/projects-dem_worker" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # lab_service/Dockerfile starts FROM projects-dem_worker: build that tag into the local docker store first
-      - name: Build the DEM worker base image
+      # The docker-container buildx driver cannot see images loaded into the runner's docker store, so the DEM worker
+      # base image is pushed to GHCR as well and lab_service/Dockerfile takes it through the BASE build argument.
+      - name: Build and push the DEM worker base image
         uses: docker/build-push-action@v6
         with:
           context: dem_worker
-          load: true
-          tags: projects-dem_worker:latest
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.base }}:${{ github.sha }}
+            ${{ steps.meta.outputs.base }}:latest
           cache-from: type=gha,scope=dem_worker
           cache-to: type=gha,scope=dem_worker,mode=min
       - name: Build and push the lab image
@@ -55,6 +61,7 @@ jobs:
           context: .
           file: lab_service/Dockerfile
           push: true
+          build-args: BASE=${{ steps.meta.outputs.base }}:${{ github.sha }}
           tags: |
             ${{ steps.meta.outputs.image }}:${{ github.sha }}
             ${{ steps.meta.outputs.image }}:latest

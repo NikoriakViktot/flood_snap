@@ -1,0 +1,42 @@
+{
+  "version": "ffpi-v1",
+  "dem_source": "fab_dem",
+  "crs": "EPSG:3035",
+  "res_m": 30,
+  "encoding": "x10",
+  "nodata": 0,
+  "formula": {
+    "expression": "FFPI = (w_s*S + w_l*L + w_h*H + w_v*V) / (w_s + w_l + w_h + w_v)",
+    "weights": {"s": 2, "l": 1, "h": 1, "v": 1},
+    "note": "One of several published weightings (NOAA/NWS Smith 2003; Romanian mountain basins). Uncalibrated for Ukraine: calibrate and verify on historical flash-flood events before use for decisions."
+  },
+  "classes": [
+    {"key": "low", "min": 0, "max": 4},
+    {"key": "moderate", "min": 4, "max": 5.5},
+    {"key": "elevated", "min": 5.5, "max": 7},
+    {"key": "high", "min": 7, "max": 8.5},
+    {"key": "very_high", "min": 8.5, "max": 10.01}
+  ],
+  "high_threshold": 7,
+  "very_high_threshold": 8.5,
+  "factors": {
+    "s": {"source": "slope_deg from the 30 m DEM (WhiteboxTools slope)", "bins_deg": [1, 2, 3, 5, 8, 12, 17, 23, 30],
+          "note": "10 classes: < 1° = 1 … >= 30° = 10"},
+    "l": {"source": "ESA WorldCover 2021 v200, overview factor 4 (~37 m)",
+          "table": {"10": 2, "20": 4, "30": 5, "40": 6, "50": 10, "60": 9, "70": 8, "90": 2, "95": 2, "100": 5},
+          "nodata_classes": [80], "note": "runoff disposition of the land use: built-up and bare highest, forest and wetland lowest"},
+    "h": {"source": "hydrologic soil group from the soil map of Ukraine (data_dnipro_h_q src/soils.py, src/hsg_grid.py)",
+          "table": {"A": 2, "B": 4, "C": 7, "D": 9}, "dual": "D", "default": 5,
+          "note": "infiltration capacity; a gap in the soil map gets the default and is counted (hsg_gap_px)"},
+    "v": {"source": "ESA WorldCover classes as a vegetation-density proxy (no NDVI source yet)",
+          "table": {"10": 1, "20": 3, "30": 5, "40": 7, "50": 10, "60": 10, "70": 9, "90": 2, "95": 2, "100": 6},
+          "nodata_classes": [80]}
+  },
+  "sources": {
+    "dem": "FABDEM v1-2 (30 m, forests and buildings removed)",
+    "landcover": "ESA WorldCover 2021 v200, CC BY 4.0",
+    "soils": "Soil map of Ukraine, HSG derived from texture (gleyed, peat, solonetz -> D)",
+    "population": "WorldPop 2020 UN-adjusted constrained 100 m v2.0, CC BY 4.0 (hromada exposure only)",
+    "admin": "COD-AB Ukraine v05 valid 2025-09-01 (OCHA / SSPE Kartographia), ADM3 = hromada"
+  }
+}

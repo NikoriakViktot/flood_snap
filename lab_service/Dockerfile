@@ -1,5 +1,7 @@
 # Flood Lab geoprocessing service (API + worker) on top of the DEM worker image (GDAL, WhiteboxTools, rasterio, shapely).
-FROM projects-dem_worker
+# BASE: the local tag on a workstation / the server, or ghcr.io/<owner>/projects-dem_worker:<sha> in CI (deploy-lab.yml)
+ARG BASE=projects-dem_worker
+FROM ${BASE}
 RUN pip install --no-cache-dir fastapi==0.115.* "uvicorn[standard]==0.30.*" pyjwt==2.9.* boto3 redis httpx
 WORKDIR /app
 COPY lab_service/ /app/lab_service/
