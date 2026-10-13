@@ -60,7 +60,7 @@ jobs:
       - name: Lab tests in the base image
         run: |
           docker run --rm -v "$PWD:/w" -w /w --entrypoint sh "${{ steps.meta.outputs.base }}:${{ github.sha }}" -c \
-            "pip install -q 'fastapi==0.115.*' 'uvicorn[standard]==0.30.*' 'pyjwt==2.9.*' boto3 redis httpx pytest fakeredis && python3 -m pytest -q -p no:cacheprovider lab_service/tests"
+            "pip install -q 'fastapi==0.115.*' 'uvicorn[standard]==0.30.*' 'pyjwt==2.9.*' boto3 redis httpx pytest fakeredis jsonschema 'celery>=5.4,<6' && python3 -m pytest -q -p no:cacheprovider lab_service/tests"
       - name: Build and push the lab image
         uses: docker/build-push-action@v6
         with:
@@ -100,7 +100,11 @@ jobs:
           docker compose -f deploy/server/docker-compose.lab.yml up -d --no-build --force-recreate
       - name: Health
         run: |
-          for i in $(seq 1 20); do docker exec $(docker ps -qf name=geoproc-1 | head -1) python3 -c "import urllib.request,sys;print(urllib.request.urlopen('http://localhost:8000/internal/health',timeout=5).read().decode())" && exit 0; sleep 5; done
+          for i in $(seq 1 20); do
+            docker exec $(docker ps -qf name=geoproc-worker-1 | head -1) celery -A lab_service.tasks inspect ping --timeout 10 2>/dev/null | grep -q pong && \
+            docker exec $(docker ps -qf name=geoproc-1 | head -1) python3 -c "import urllib.request,sys;print(urllib.request.urlopen('http://localhost:8000/internal/health',timeout=5).read().decode())" && exit 0
+            sleep 6
+          done
           docker logs --tail 100 $(docker ps -aqf name=geoproc-1 | head -1) || true
           exit 1
       - name: Prune

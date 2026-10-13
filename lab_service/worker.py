@@ -79,16 +79,14 @@ def _child(job: dict, out_dir: str, conn) -> None:
         conn.close()
 
 
-def run_job(store: JobStore, job_id: str) -> None:
-    rec = store.load(job_id)
-    if rec is None or rec["status"] != "queued":
-        return
-    p = rec["params"]
-    cb = lambda body: post_callback(p.get("callback_url"), p.get("callback_token"), {"job_id": job_id, **body})
-    store.update(job_id, status="running", progress_pct=5, stage="starting")
-    cb({"status": "running", "progress_pct": 5, "error": None})
+def execute(job: dict, out_dir: str, report) -> dict:
+    """Run one job in a memory-limited child process; `report(body)` receives every state change (running with
+    progress, then done with the result or failed with the error). Returns the final body. Shared by the Celery
+    task (report = an event to the platform) and the legacy loop below (report = job file + HTTP callback)."""
+    job_id = job["job_id"]
+    report({"status": "running", "progress_pct": 5, "stage": "starting", "error": None})
     parent, child = mp.Pipe(duplex=False)
-    proc = mp.get_context("spawn").Process(target=_child, args=(rec, str(store.out_dir(job_id)), child), daemon=False)
+    proc = mp.get_context("spawn").Process(target=_child, args=(job, out_dir, child), daemon=False)
     proc.start()
     child.close()
     outcome = None
@@ -99,8 +97,7 @@ def run_job(store: JobStore, job_id: str) -> None:
             break
         if kind == "progress":
             pct, stage = rest
-            store.update(job_id, progress_pct=pct, stage=stage)
-            cb({"status": "running", "progress_pct": pct, "error": None})
+            report({"status": "running", "progress_pct": pct, "stage": stage, "error": None})
         else:
             outcome = (kind, rest[0])
     proc.join()
@@ -108,11 +105,33 @@ def run_job(store: JobStore, job_id: str) -> None:
         outcome = ("failed", "out of memory (worker killed)" if proc.exitcode == -9 else f"worker exited with code {proc.exitcode}")
     kind, payload = outcome
     if kind == "done":
-        rec = store.update(job_id, status="done", progress_pct=100, stage="done", result=payload, error=None)
+        body = {"status": "done", "progress_pct": 100, "stage": "done", "error": None, "result_ref": f"lab:{job_id}",
+                "result": payload, "products": []}
     else:
-        rec = store.update(job_id, status="failed", progress_pct=100, stage="failed", error=payload)
-    cb({k: v for k, v in public_view(rec).items() if k != "job_id"})
-    log.info("job %s %s", job_id, rec["status"])
+        body = {"status": "failed", "progress_pct": 100, "stage": "failed", "error": payload, "result_ref": None,
+                "result": None, "products": []}
+    report(body)
+    log.info("job %s %s", job_id, body["status"])
+    return body
+
+
+def run_job(store: JobStore, job_id: str) -> None:
+    """LEGACY transport: job file + HTTP callback (lab_service/api.py)."""
+    rec = store.load(job_id)
+    if rec is None or rec["status"] != "queued":
+        return
+    p = rec["params"]
+
+    def report(body: dict) -> None:
+        fields = {k: body[k] for k in ("status", "progress_pct", "stage", "error") if k in body}
+        if body["status"] == "done":
+            fields["result"] = body["result"]
+        r = store.update(job_id, **fields)
+        if body["status"] in ("done", "failed"):
+            body = {k: v for k, v in public_view(r).items() if k != "job_id"}
+        post_callback(p.get("callback_url"), p.get("callback_token"), {"job_id": job_id, **body})
+
+    execute(rec, str(store.out_dir(job_id)), report)
 
 
 def main() -> None:

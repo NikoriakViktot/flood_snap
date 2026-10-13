@@ -2,7 +2,7 @@
 # BASE: the local tag on a workstation / the server, or ghcr.io/<owner>/projects-dem_worker:<sha> in CI (deploy-lab.yml)
 ARG BASE=projects-dem_worker
 FROM ${BASE}
-RUN pip install --no-cache-dir fastapi==0.115.* "uvicorn[standard]==0.30.*" pyjwt==2.9.* boto3 redis httpx
+RUN pip install --no-cache-dir fastapi==0.115.* "uvicorn[standard]==0.30.*" pyjwt==2.9.* boto3 redis httpx "celery>=5.4,<6"
 WORKDIR /app
 COPY lab_service/ /app/lab_service/
 ENV PYTHONPATH=/app PYTHONUNBUFFERED=1
