@@ -209,8 +209,41 @@ Constants: `METHOD = lab.national_d8.v1`, `STREAM_THRESHOLD_CELLS = 2000`, `LEVE
 3. The container runs as root; add `USER` and `cap_drop: [ALL]`.
 4. `lab.env.example` does not list `SERVICE_JWT_AUD/ISS/ALG`, `LAB_QUEUE_KEY`, `TERRAIN_LOCAL`,
    `JOB_TTL_DAYS`, `PRIMARY_DEM`, `SNAP_DISTANCE_M`, `MAX_BASIN_KM2`.
-5. `stream_threshold` is accepted but ignored (2000 cells fixed); either honour it or drop it from
-   the contract on both sides.
+5. `stream_threshold` is accepted but ignored by the delineation (2000 cells fixed); the HAND model honours its own
+   `stream_threshold_km2` (section 10).
+6. WhiteboxTools `StreamLinkSlope` is not used: on a synthetic valley its values did not follow the channel gradient
+   (2.37 / 2.59 for 2 % / 10 % channels); the reach slope is computed from the breached DEM instead.
+
+---
+
+## 10. HAND models (`geoproc.hand_model`, 2026-10-13, plan M1)
+
+One basin, one DEM, one stream-initiation threshold → the basin's own HAND, slope and reach rasters with provenance.
+Input: `contracts/hand_model.v1.json` (`hand_model_id, basin_id, outlet_lon/lat, region, dem, stream_threshold_km2 ∈
+{0.5, 1, 2, 5}`). Validation (`hand/validate.py`): outlet inside the district, DEM published, threshold in the enum,
+`dem_f32.tif` staged for the district (`scripts/national/stage_dem_f32.py`, optional file of the terrain manifest).
+
+Pipeline (`hand/pipeline.py`, child process `hand/runner.py` with the same RLIMIT_AS as the delineation):
+snap → `watershed` on the staged district D8 (the delineation's basin) → window = basin bbox + `HAND_WINDOW_BUFFER_M`
+(1000 m; the DEM is never clipped to the basin before D8) → `breach_depressions(fill_pits, flat_increment=0.001)` →
+`d8_pointer` → `d8_flow_accumulation(cells)` → `extract_streams(threshold cells = km²·1e6/900)` →
+`elevation_above_stream` (HAND, negatives → 0) → `slope(degrees)` on the original DEM → `stream_link_identifier` →
+`subbasins` (ids re-numbered to the link ids) → `stream_link_length` → numpy: mask to the basin, crop to its bbox,
+statistics, reach table (slope per link = Δz of the breached DEM / path length inside the basin).
+
+Products (`hand/packaging.py`, `hand/products.py`; every file travels in the done event as `content_b64`, the
+platform stores it; `processing_version = lab.hand.v1`):
+`hand.tif`, `slope.tif`, `dem_conditioning.tif` (breached − original) — Float32 COG, EPSG:3035, nodata −9999;
+`stream_links.tif`, `catchments.tif` — Int32 COG; `hand_3857.png` / `aux_3857.png` — lossless RGBA8 on the zoom-12
+WebMercatorQuad grid (HAND = (256·R + G)/10 dm, 65535 = NoData, B = channel, A = validity; aux: R = slope·2 in
+half-degrees, G·256 + B = catchment id); `reaches.json`, `model_config.json` (hashed → `config_hash`),
+`metadata.json` (DEM source + EGM2008, versions of WhiteboxTools / GDAL / rasterio / numpy / Pillow / python, timings,
+statistics, limitations). Budgets: `HAND_MAX_BASIN_KM2` 2000, `HAND_PNG_MAX_PIXELS` 4 M (above: COGs only),
+`HAND_PRODUCT_MAX_MB` 8.5, `HAND_EVENT_MAX_MB` 40 (optional products are dropped in a fixed order, never the HAND COG).
+Event: `result = {kind: hand_model, stats, metadata, config_hash, snapped_outlet}` (`job_event.v1.json` v1.1).
+
+Tests: `tests/test_hand_pipeline.py` (synthetic 120×120 valley with analytic HAND, packaging, budgets),
+`tests/test_hand_packaging.py` (PNG round trip, z12 grid, COG), `tests/test_hand_tasks.py` (contracts, validation).
 
 ---
 

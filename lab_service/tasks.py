@@ -4,8 +4,8 @@ The platform (Django) owns the job: it creates the Job row, sends `geoproc.basin
 queue `geoproc` on the platform broker, and keeps the job state. This worker validates the request, runs the pipeline
 in a memory-limited child process and reports every state change as the task `platform.geoproc_event(job_id,
 payload)` on the platform queue — no HTTP callback, no callback token, no job files as the source of truth.
-Contracts: contracts/basin_delineation.v1.json (task input) and contracts/job_event.v1.json (event payload); the
-canonical copies live in geoai-django contracts/geoproc/.
+Contracts: contracts/basin_delineation.v1.json and contracts/hand_model.v1.json (task inputs), contracts/job_event.v1.json
+(event payload); the canonical copies live in geoai-django contracts/geoproc/.
 
   celery -A lab_service.tasks worker -Q geoproc -P solo --prefetch-multiplier 1 -n lab@%h
 
@@ -36,6 +36,7 @@ app.conf.update(
 )
 
 BASIN_TASK = "geoproc.basin_delineation"
+HAND_TASK = "geoproc.hand_model"
 EVENT_TASK = "platform.geoproc_event"
 
 
@@ -56,6 +57,30 @@ def basin_delineation(job_id: str, params: dict) -> str:
     out_dir = JobStore().out_dir(job_id)
     try:
         return execute({"job_id": job_id, "params": prepared}, str(out_dir), lambda body: emit(job_id, body))["status"]
+    except Exception as e:  # noqa: BLE001  never leave the platform's job 'running' on an unexpected error
+        log.exception("job %s crashed", job_id)
+        emit(job_id, {"status": "failed", "progress_pct": 100, "stage": "crashed", "error": f"{type(e).__name__}: {e}",
+                      "result_ref": None, "result": None, "products": []})
+        return "failed"
+
+
+@app.task(name=HAND_TASK)
+def hand_model(job_id: str, params: dict) -> str:
+    """HAND model of one delineated basin (contracts/hand_model.v1.json): the delineation's transport, the pipeline
+    child is lab_service.hand.runner.hand_child."""
+    from lab_service.hand import runner
+    from lab_service.hand import validate as HV
+    from lab_service.worker import execute
+    try:
+        prepared = HV.prepare_hand(params, TerrainStore())
+    except (V.Rejected, V.Unavailable) as e:
+        emit(job_id, {"status": "failed", "progress_pct": 100, "stage": "rejected", "error": str(e),
+                      "result_ref": None, "result": None, "products": []})
+        return "failed"
+    out_dir = JobStore().out_dir(job_id)
+    try:
+        return execute({"job_id": job_id, "kind": "hand_model", "params": prepared}, str(out_dir),
+                       lambda body: emit(job_id, body), target=runner.hand_child)["status"]
     except Exception as e:  # noqa: BLE001  never leave the platform's job 'running' on an unexpected error
         log.exception("job %s crashed", job_id)
         emit(job_id, {"status": "failed", "progress_pct": 100, "stage": "crashed", "error": f"{type(e).__name__}: {e}",

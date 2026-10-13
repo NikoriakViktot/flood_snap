@@ -1,7 +1,7 @@
 """The precomputed national terrain (scripts/national/stage_terrain.py) read from S3 through a disk cache.
 
 Layout: <prefix>/_districts/{index.json,<slug>.geojson}, <prefix>/dem_source=<dem>/manifest.json,
-<prefix>/dem_source=<dem>/<slug>/{d8,streams,hand,dem}.tif. A district raster is downloaded on first use and kept
+<prefix>/dem_source=<dem>/<slug>/{d8,streams,hand,dem}.tif (+ dem_f32.tif where staged: Float32 DEM for HAND models). A district raster is downloaded on first use and kept
 under CACHE_ROOT; its sha256 from the manifest is checked once after the download. TERRAIN_LOCAL points at a local
 copy of the same tree (tests, the workstation) and bypasses S3.
 """
@@ -22,6 +22,10 @@ from shapely.prepared import prep
 from lab_service import settings
 
 FILES = ("d8", "streams", "hand", "dem")
+
+
+class TerrainMissing(RuntimeError):
+    """A district raster the manifest does not list (an optional file such as dem_f32 not staged yet)."""
 
 
 def crs_of(geojson: dict) -> str:
@@ -117,10 +121,24 @@ class TerrainStore:
         except Exception:
             return False
 
+    def entry(self, dem: str, slug: str) -> dict:
+        e = next((d for d in self.manifest(dem)["districts"] if d["slug"] == slug), None)
+        if e is None:
+            raise TerrainMissing(f"district {slug} is not in the {dem} terrain manifest")
+        return e
+
+    def has(self, dem: str, slug: str, name: str) -> bool:
+        """Whether the manifest lists `<name>.tif` for the district (optional files: dem_f32)."""
+        try:
+            return f"{name}.tif" in self.entry(dem, slug)["files"]
+        except TerrainMissing:
+            return False
+
     def ensure(self, dem: str, slug: str, name: str) -> Path:
         """Local path of one district raster, downloaded on first use and verified against the manifest."""
-        entry = next(d for d in self.manifest(dem)["districts"] if d["slug"] == slug)
-        meta = entry["files"][f"{name}.tif"]
+        meta = self.entry(dem, slug)["files"].get(f"{name}.tif")
+        if meta is None:
+            raise TerrainMissing(f"{name}.tif is not staged for district {slug} ({dem})")
         dst = self.cache / f"dem_source={dem}" / slug / f"{name}.tif"
         if dst.exists() and dst.stat().st_size == meta["bytes"]:
             os.utime(dst)
@@ -142,8 +160,8 @@ class TerrainStore:
         self.evict()
         return dst
 
-    def paths(self, dem: str, slug: str) -> dict[str, Path]:
-        return {n: self.ensure(dem, slug, n) for n in FILES}
+    def paths(self, dem: str, slug: str, names: tuple[str, ...] = FILES) -> dict[str, Path]:
+        return {n: self.ensure(dem, slug, n) for n in names}
 
     def cache_bytes(self) -> int:
         return sum(p.stat().st_size for p in self.cache.rglob("*.tif"))

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "geoproc/hand_model.v1",
+  "title": "geoproc.hand_model task kwargs",
+  "description": "Canonical: geoai-django contracts/geoproc/hand_model.v1.json; vendored copy in flood_snap lab_service/contracts/. Sent by the platform to the queue `geoproc`: a HAND model of one delineated basin on one DEM at one stream-initiation threshold.",
+  "type": "object",
+  "required": ["job_id", "params"],
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {"type": "string", "description": "the platform Job id (UUID); also the Celery task id"},
+    "params": {
+      "type": "object",
+      "required": ["hand_model_id", "basin_id", "outlet_lon", "outlet_lat", "region", "dem", "stream_threshold_km2"],
+      "properties": {
+        "hand_model_id": {"type": "string", "description": "the platform HandModel id (UUID)"},
+        "basin_id": {"type": "string", "description": "the BasinDelineation the model belongs to; its (snapped) outlet is sent below"},
+        "outlet_lon": {"type": "number", "minimum": -180, "maximum": 180},
+        "outlet_lat": {"type": "number", "minimum": -90, "maximum": 90},
+        "region": {"type": "string", "description": "river-basin district code, e.g. 5.3.2"},
+        "dem": {"enum": ["fab_dem", "copernicus_dem"]},
+        "stream_threshold_km2": {"enum": [0.5, 1, 2, 5], "description": "stream-initiation threshold (sensitivity options, not recommended values)"},
+        "project_id": {"type": ["string", "null"]}
+      }
+    }
+  }
+}
