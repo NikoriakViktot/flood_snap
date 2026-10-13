@@ -2,183 +2,78 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "geoproc/job_event.v1",
   "title": "platform.geoproc_event task kwargs",
-  "description": "Canonical copy: geoai-django contracts/geoproc/job_event.v1.json. Sent by a geoprocessing worker to the platform queue after every state change.",
+  "description": "Canonical: geoai-django contracts/geoproc/job_event.v1.json; vendored copy in flood_snap lab_service/contracts/. Sent by a geoprocessing worker to the platform queue after every state change. v1.1 (2026-10-13): result.kind (basin_delineation | hand_model), result.metadata / config_hash, products[].file_name / license; a done event always carries result.stats, result.basin only for a basin delineation.",
   "type": "object",
-  "required": [
-    "job_id",
-    "payload"
-  ],
+  "required": ["job_id", "payload"],
   "additionalProperties": false,
   "properties": {
-    "job_id": {
-      "type": "string"
-    },
+    "job_id": {"type": "string"},
     "payload": {
       "type": "object",
-      "required": [
-        "status"
-      ],
+      "required": ["status"],
       "properties": {
-        "status": {
-          "enum": [
-            "running",
-            "done",
-            "failed"
-          ]
-        },
-        "progress_pct": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 100
-        },
-        "stage": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "result_ref": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
+        "status": {"enum": ["running", "done", "failed"]},
+        "progress_pct": {"type": "integer", "minimum": 0, "maximum": 100},
+        "stage": {"type": ["string", "null"]},
+        "error": {"type": ["string", "null"]},
+        "result_ref": {"type": ["string", "null"]},
         "result": {
-          "type": [
-            "object",
-            "null"
-          ],
+          "type": ["object", "null"],
           "properties": {
-            "basin": {
-              "type": "object"
-            },
-            "snapped_outlet": {
-              "type": "object"
-            },
-            "stats": {
-              "type": "object"
-            }
+            "kind": {"enum": ["basin_delineation", "hand_model"]},
+            "basin": {"type": "object"},
+            "snapped_outlet": {"type": "object"},
+            "stats": {"type": "object"},
+            "metadata": {"type": "object", "description": "hand_model: the provenance package (metadata.json)"},
+            "config_hash": {"type": "string", "description": "hand_model: sha256 of the hashed configuration"},
+            "dropped_products": {"type": "array", "items": {"type": "string"}}
           }
         },
         "products": {
           "type": "array",
-          "description": "Data products of the job. A file either travels in the event (content_b64, small rasters such as a basin's HAND) and the platform stores it, or is already stored (storage_ref).",
+          "description": "Data products of the job. A file either travels in the event (content_b64; the platform stores it) or is already stored (storage_ref).",
           "items": {
             "type": "object",
-            "required": [
-              "kind",
-              "name",
-              "media_type",
-              "processing_version"
-            ],
-            "oneOf": [
-              {
-                "required": [
-                  "content_b64"
-                ]
-              },
-              {
-                "required": [
-                  "storage_ref"
-                ]
-              }
-            ],
+            "required": ["kind", "name", "media_type", "processing_version"],
+            "oneOf": [{"required": ["content_b64"]}, {"required": ["storage_ref"]}],
             "properties": {
-              "kind": {
-                "type": "string",
-                "examples": [
-                  "hand_basin"
-                ]
-              },
-              "name": {
-                "type": "string"
-              },
-              "dem": {
-                "type": "string"
-              },
-              "media_type": {
-                "type": "string"
-              },
-              "processing_version": {
-                "type": "string"
-              },
-              "crs": {
-                "type": "string"
-              },
-              "resolution_m": {
-                "type": [
-                  "number",
-                  "null"
-                ]
-              },
-              "bbox": {
-                "type": "object"
-              },
-              "stats": {
-                "type": "object"
-              },
-              "source_attribution": {
-                "type": "string"
-              },
-              "content_b64": {
-                "type": "string",
-                "maxLength": 12000000
-              },
-              "storage_ref": {
-                "type": "string"
-              }
+              "kind": {"type": "string", "examples": ["hand", "slope", "hand_png", "model_config"]},
+              "name": {"type": "string"},
+              "file_name": {"type": "string", "description": "the platform stores the file under this name (hand.tif, hand_3857.png, metadata.json …)"},
+              "dem": {"type": "string"},
+              "media_type": {"type": "string"},
+              "processing_version": {"type": "string"},
+              "crs": {"type": "string"},
+              "resolution_m": {"type": ["number", "null"]},
+              "bbox": {"type": "object"},
+              "stats": {"type": "object"},
+              "source_attribution": {"type": "string"},
+              "license": {"type": ["string", "null"]},
+              "content_b64": {"type": "string", "maxLength": 12000000},
+              "storage_ref": {"type": "string"}
             }
           }
         }
       },
       "allOf": [
         {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "done"
-              }
-            }
-          },
+          "if": {"properties": {"status": {"const": "done"}}},
           "then": {
-            "required": [
-              "result"
-            ],
+            "required": ["result"],
             "properties": {
               "result": {
                 "type": "object",
-                "required": [
-                  "basin",
-                  "stats"
-                ]
+                "required": ["stats"],
+                "if": {"properties": {"kind": {"const": "hand_model"}}, "required": ["kind"]},
+                "then": {"required": ["stats", "config_hash", "metadata"]},
+                "else": {"required": ["basin", "stats"]}
               }
             }
           }
         },
         {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "failed"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "error"
-            ],
-            "properties": {
-              "error": {
-                "type": "string"
-              }
-            }
-          }
+          "if": {"properties": {"status": {"const": "failed"}}},
+          "then": {"required": ["error"], "properties": {"error": {"type": "string"}}}
         }
       ]
     }

@@ -32,6 +32,25 @@ LEVELS_M = tuple(range(1, 11))
 CHILD_MEM_BYTES = int(float(os.environ.get("CHILD_MEM_GB", "2.5")) * 2**30)
 METHOD = "lab.national_d8.v1"
 STREAM_THRESHOLD_CELLS = 2000
-# the basin raster shipped to the platform with the result (base64 in the Celery event); bigger basins send stats only
-RASTER_MAX_MB = float(os.environ.get("LAB_RASTER_MAX_MB", "8"))
 STREAM_THRESHOLD_PRESET = "medium"     # the platform preset (low|medium|high) that 2000 cells corresponds to
+
+# -- HAND models (lab_service/hand): one basin, one DEM, one stream-initiation threshold ---------------------------
+PIPELINE_VERSION = "lab.hand.v1"
+HAND_THRESHOLDS_KM2 = (0.5, 1.0, 2.0, 5.0)          # sensitivity options, not recommended values
+HAND_WINDOW_BUFFER_M = float(os.environ.get("HAND_WINDOW_BUFFER_M", "1000"))   # DEM window = basin bbox + buffer
+HAND_MAX_BASIN_KM2 = float(os.environ.get("HAND_MAX_BASIN_KM2", "2000"))       # inline delivery limit (M1)
+HAND_PNG_MAX_PIXELS = int(os.environ.get("HAND_PNG_MAX_PIXELS", "4000000"))     # browser PNG budget (z12 grid)
+HAND_PRODUCT_MAX_MB = float(os.environ.get("HAND_PRODUCT_MAX_MB", "8.5"))      # contract: content_b64 <= 12 M chars
+HAND_EVENT_MAX_MB = float(os.environ.get("HAND_EVENT_MAX_MB", "40"))           # all products of one done event
+PNG_ZOOM = 12                                        # WebMercatorQuad zoom of the browser PNGs (future XYZ tiles align)
+LAB_IMAGE_TAG = os.environ.get("LAB_IMAGE_TAG", "")  # provenance: the image this worker runs
+DEM_LABELS = {
+    "copernicus_dem": {"label": "Copernicus GLO-30", "version": "Copernicus DEM GLO-30 (2019 release, AWS Open Data mirror)",
+                       "vertical_datum": "EGM2008", "horizontal_datum": "WGS84", "native_res": "1 arc-second",
+                       "attribution": "© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under "
+                                      "COPERNICUS by the European Union and ESA",
+                       "licence": "Copernicus DEM licence (free for all users)"},
+    "fab_dem": {"label": "FABDEM", "version": "FABDEM v1-2 (Hawker et al. 2022)", "vertical_datum": "EGM2008",
+                "horizontal_datum": "WGS84", "native_res": "1 arc-second", "attribution": "FABDEM © University of Bristol",
+                "licence": "CC BY-NC-SA 4.0 (non-commercial)"},
+}

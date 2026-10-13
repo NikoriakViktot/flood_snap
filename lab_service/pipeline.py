@@ -2,6 +2,7 @@
 
 snap the outlet to the nearest stream cell → WhiteboxTools `watershed` on the district D8 pointer with a raster
 pour point → polygonise → clip HAND / DEM / streams → statistics and flood extents per level.
+The basin's own HAND is a separate job (lab_service/hand): the delineation ships statistics and polygons only.
 """
 from __future__ import annotations
 
@@ -214,49 +215,8 @@ def run_one(wbt, dem: str, paths: dict[str, Path], lon: float, lat: float, tmp: 
     basin_3035 = polygonise(mask, transform, snap["crs"], simplify_m=res / 2)
     basin_4326 = to_wgs84(basin_3035, snap["crs"])
     simplified = to_wgs84(polygonise(mask, transform, snap["crs"], simplify_m=45.0), snap["crs"])
-    raster = basin_raster(hand, streams, mask, transform, snap["crs"], res)
-    if raster is None:
-        stats["quality"]["warnings"].append(f"the basin raster is larger than {settings.RASTER_MAX_MB} MB and is not shipped")
     return {"dem": dem, "basin_3035": basin_3035, "basin": round_geojson(basin_4326), "basin_simplified": round_geojson(simplified),
-            "snapped_outlet": {"type": "Point", "coordinates": [snap["lon"], snap["lat"]]}, "stats": stats, "raster": raster}
-
-
-def basin_raster(hand, streams, mask, transform, crs, res: float) -> dict | None:
-    """The basin's HAND and channels for the browser: a 2-band uint8 GeoTIFF in EPSG:3857 (band 1 = HAND in decimetres
-    0–254, 255 = outside the basin / no data; band 2 = 1 on a channel cell), so a map draws any water level from it
-    without a tile server. Nearest-neighbour reprojection at the source ground resolution. None when it would exceed
-    RASTER_MAX_MB (huge basins: the statistics still come back)."""
-    import io
-
-    from rasterio.warp import Resampling, calculate_default_transform, reproject, transform_bounds
-    dm = np.where(mask & ~np.ma.getmaskarray(hand), np.clip(np.round(hand.filled(0) * 10), 0, 254), 255).astype("uint8")
-    ch = np.where(mask & streams, 1, 0).astype("uint8")
-    h, w = dm.shape
-    left, top = transform.c, transform.f
-    right, bottom = left + w * transform.a, top + h * transform.e
-    dst_t, dw, dh = calculate_default_transform(crs, "EPSG:3857", w, h, left, bottom, right, top)
-    if dw * dh * 2 > settings.RASTER_MAX_MB * 2**20 * 4:      # deflate shrinks these ~4x; refuse beyond the budget
-        return None
-    out = np.full((2, dh, dw), 0, dtype="uint8")
-    out[0].fill(255)
-    reproject(dm, out[0], src_transform=transform, src_crs=crs, dst_transform=dst_t, dst_crs="EPSG:3857",
-              src_nodata=255, dst_nodata=255, resampling=Resampling.nearest)
-    reproject(ch, out[1], src_transform=transform, src_crs=crs, dst_transform=dst_t, dst_crs="EPSG:3857",
-              resampling=Resampling.nearest)
-    buf = io.BytesIO()
-    with rasterio.MemoryFile() as mf:
-        with mf.open(driver="GTiff", height=dh, width=dw, count=2, dtype="uint8", crs="EPSG:3857", transform=dst_t,
-                     nodata=255, compress="deflate", predictor=2, tiled=True, blockxsize=256, blockysize=256) as d:
-            d.write(out)
-            d.set_band_description(1, "hand_dm")
-            d.set_band_description(2, "channel")
-        buf.write(mf.read())
-    data = buf.getvalue()
-    if len(data) > settings.RASTER_MAX_MB * 2**20:
-        return None
-    west, south, east, north = transform_bounds("EPSG:3857", "EPSG:4326", dst_t.c, dst_t.f + dh * dst_t.e, dst_t.c + dw * dst_t.a, dst_t.f)
-    return {"bytes": data, "width": dw, "height": dh, "bounds": [round(west, 6), round(south, 6), round(east, 6), round(north, 6)],
-            "ground_res_m": res}
+            "snapped_outlet": {"type": "Point", "coordinates": [snap["lon"], snap["lat"]]}, "stats": stats}
 
 
 def compare(primary: dict, secondary: dict) -> dict:
