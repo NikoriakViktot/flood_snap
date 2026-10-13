@@ -117,3 +117,33 @@ def test_wbt_readable_copies_out_of_paths_with_equals(tmp_path, monkeypatch):
         assert (r.read(1) == s.read(1)).all()
     t = os.stat(out).st_mtime_ns
     assert P.wbt_readable(src) == out and os.stat(out).st_mtime_ns == t     # cached
+
+
+def test_basin_raster_is_a_web_mercator_two_band_tiff():
+    import io
+    import numpy as np
+    import rasterio
+    from rasterio.transform import from_origin
+    mask = np.zeros((40, 50), bool)
+    mask[5:35, 10:45] = True
+    hand = np.ma.array(np.tile(np.linspace(0, 12, 50, dtype="float32"), (40, 1)), mask=~mask)
+    streams = np.zeros((40, 50), bool)
+    streams[20, 10:45] = True
+    r = P.basin_raster(hand, streams, mask, from_origin(5_400_000, 2_900_000, 30, 30), "EPSG:3035", 30)
+    assert r is not None and r["bounds"][0] < r["bounds"][2] and r["bounds"][1] < r["bounds"][3]
+    with rasterio.open(io.BytesIO(r["bytes"])) as ds:
+        assert ds.crs.to_epsg() == 3857 and ds.count == 2 and ds.dtypes == ("uint8", "uint8") and ds.nodata == 255
+        b1, b2 = ds.read(1), ds.read(2)
+    inside = b1 != 255
+    assert inside.any() and (~inside).any()              # outside the basin stays nodata
+    assert b1[inside].max() <= 120 and b2.max() == 1      # HAND in decimetres, channel flag
+
+
+def test_basin_raster_refuses_beyond_the_budget(monkeypatch):
+    import numpy as np
+    from rasterio.transform import from_origin
+    from lab_service import settings
+    monkeypatch.setattr(settings, "RASTER_MAX_MB", 0.0001)
+    mask = np.ones((200, 200), bool)
+    hand = np.ma.array(np.ones((200, 200), "float32"), mask=False)
+    assert P.basin_raster(hand, np.zeros((200, 200), bool), mask, from_origin(5_400_000, 2_900_000, 30, 30), "EPSG:3035", 30) is None

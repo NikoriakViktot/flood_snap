@@ -32,4 +32,6 @@ LEVELS_M = tuple(range(1, 11))
 CHILD_MEM_BYTES = int(float(os.environ.get("CHILD_MEM_GB", "2.5")) * 2**30)
 METHOD = "lab.national_d8.v1"
 STREAM_THRESHOLD_CELLS = 2000
+# the basin raster shipped to the platform with the result (base64 in the Celery event); bigger basins send stats only
+RASTER_MAX_MB = float(os.environ.get("LAB_RASTER_MAX_MB", "8"))
 STREAM_THRESHOLD_PRESET = "medium"     # the platform preset (low|medium|high) that 2000 cells corresponds to

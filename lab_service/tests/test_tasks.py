@@ -57,7 +57,9 @@ def test_events_of_a_run_match_the_contract(lab, monkeypatch):
         report({"status": "running", "progress_pct": 5, "stage": "starting", "error": None})
         body = {"status": "done", "progress_pct": 100, "stage": "done", "error": None, "result_ref": "lab:j2",
                 "result": {"basin": {"type": "Polygon", "coordinates": []}, "snapped_outlet": {"type": "Point", "coordinates": [25, 48.5]},
-                           "stats": {"area_km2": 1.0}}, "products": []}
+                           "stats": {"area_km2": 1.0}}, "products": [
+                    {"kind": "hand_basin", "name": "HAND · fab_dem · basin", "dem": "fab_dem", "media_type": "image/tiff",
+                     "processing_version": "lab.national_d8.v1", "crs": "EPSG:3857", "content_b64": "SUkqAA=="}]}
         report(body)
         return body
 
@@ -100,6 +102,13 @@ def test_unexpected_error_becomes_a_failed_event(lab, monkeypatch):
     assert [k["payload"]["status"] for _, k, _ in sent] == ["running", "failed"]
     for _, k, _ in sent:
         _ok(k)
+
+
+def test_contract_rejects_a_product_without_a_file():
+    bad = {"job_id": "x", "payload": {"status": "done", "result": {"basin": {}, "stats": {}},
+                                     "products": [{"kind": "hand_basin", "name": "n", "media_type": "image/tiff", "processing_version": "v"}]}}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(bad, EVENT)
 
 
 def test_contract_rejects_a_done_event_without_result():
