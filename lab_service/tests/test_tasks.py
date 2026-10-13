@@ -68,6 +68,25 @@ def test_events_of_a_run_match_the_contract(lab, monkeypatch):
         _ok(k)
 
 
+def test_district_files_in_epsg3035_are_matched_in_lon_lat(tmp_path, monkeypatch):
+    """The staged cut lines are EPSG:3035 (as on the server); an outlet in lon/lat must still be found."""
+    from pyproj import Transformer
+    tr = Transformer.from_crs("EPSG:4326", "EPSG:3035", always_xy=True)
+    ring = [list(tr.transform(x, y)) for x, y in [(24, 48), (26, 48), (26, 49), (24, 49), (24, 48)]]
+    local = tmp_path / "terrain"
+    (local / "_districts").mkdir(parents=True)
+    (local / "_districts" / "index.json").write_text(json.dumps([{"code": "5.3.2", "slug": "5_3_2", "name_ua": "Прут", "km2": 100}]))
+    (local / "_districts" / "5_3_2.geojson").write_text(json.dumps({
+        "type": "FeatureCollection", "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::3035"}},
+        "features": [{"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": [ring]}}]}))
+    from lab_service import settings
+    from lab_service.terrain import TerrainStore
+    monkeypatch.setattr(settings, "TERRAIN_LOCAL", str(local))
+    t = TerrainStore(tmp_path / "cache")
+    assert t.find_district(24.5755, 48.4583).code == "5.3.2"
+    assert t.find_district(30.52, 50.45) is None
+
+
 def test_contract_rejects_a_done_event_without_result():
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate({"job_id": "x", "payload": {"status": "done"}}, EVENT)
