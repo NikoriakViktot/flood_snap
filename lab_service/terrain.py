@@ -16,11 +16,30 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from shapely.geometry import Point, shape
+from shapely.ops import transform as shp_transform
 from shapely.prepared import prep
 
 from lab_service import settings
 
 FILES = ("d8", "streams", "hand", "dem")
+
+
+def crs_of(geojson: dict) -> str:
+    """EPSG code of a GeoJSON's legacy `crs` member ('urn:ogc:def:crs:EPSG::3035' -> 'EPSG:3035'); RFC 7946 = WGS84."""
+    name = ((geojson.get("crs") or {}).get("properties") or {}).get("name", "")
+    if "CRS84" in name or not name:
+        return "EPSG:4326"
+    return "EPSG:" + name.rsplit(":", 1)[-1]
+
+
+def to_wgs84(geom, crs: str):
+    """The staged district cut lines are EPSG:3035 (scripts/national/stage_terrain.py); outlets arrive as lon/lat.
+    Without this every outlet was 'outside every river-basin district' (found 2026-10-13)."""
+    if crs in ("EPSG:4326", "EPSG:4258"):
+        return geom
+    from pyproj import Transformer
+    t = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+    return shp_transform(t.transform, geom)
 
 
 @dataclass(frozen=True)
@@ -69,7 +88,8 @@ class TerrainStore:
             out = []
             for d in index:
                 g = json.loads(self._fetch(f"_districts/{d['slug']}.geojson", self.cache / "_districts" / f"{d['slug']}.geojson", 86400).read_text())
-                geom = shape(g["features"][0]["geometry"] if g.get("type") == "FeatureCollection" else g.get("geometry", g))
+                geom = to_wgs84(shape(g["features"][0]["geometry"] if g.get("type") == "FeatureCollection" else g.get("geometry", g)),
+                                crs_of(g))
                 out.append((District(d["code"], d["slug"], d["name_ua"], float(d["km2"])), prep(geom)))
             self._districts = out
         return self._districts
