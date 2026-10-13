@@ -1,3 +1,10 @@
+# Flood Lab (geoproc + geoproc-worker) -> GeoHydroAI EC2 server, compose project `server` on docker network `geoai_web`.
+#
+# 1. build  — GitHub-hosted runner: the DEM worker base image (ubuntu 22.04 + GDAL + WhiteboxTools) and the lab image on
+#             top of it, pushed to GHCR as ghcr.io/<owner>/geohydroai-lab:<sha> (+ :latest). The production host
+#             (t3.large, 2 vCPU, 7.8 GB) no longer builds anything (server audit 2026-10-13).
+# 2. deploy — self-hosted runner ON THE SERVER: pulls the image, tags it geohydroai-lab:latest for the compose file,
+#             recreates both containers and waits for /internal/health.
 name: Deploy Flood Lab (geoproc)
 
 on:
@@ -6,20 +13,83 @@ on:
     paths: ["lab_service/**", "dem_worker/**", "deploy/server/docker-compose.lab.yml", ".github/workflows/deploy-lab.yml"]
   workflow_dispatch:
 
+concurrency:
+  group: deploy-lab
+  cancel-in-progress: false
+
+env:
+  IMAGE: geohydroai-lab
+  REGISTRY: ghcr.io
+
 jobs:
-  deploy:
-    runs-on: [self-hosted, Linux, X64]
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
     steps:
       - uses: actions/checkout@v4
+      - id: meta
+        run: echo "image=$REGISTRY/${GITHUB_REPOSITORY_OWNER,,}/$IMAGE" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # lab_service/Dockerfile starts FROM projects-dem_worker: build that tag into the local docker store first
       - name: Build the DEM worker base image
-        run: docker build -t projects-dem_worker dem_worker
-      - name: Build and start geoproc + worker
+        uses: docker/build-push-action@v6
+        with:
+          context: dem_worker
+          load: true
+          tags: projects-dem_worker:latest
+          cache-from: type=gha,scope=dem_worker
+          cache-to: type=gha,scope=dem_worker,mode=min
+      - name: Build and push the lab image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: lab_service/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ github.sha }}
+            ${{ steps.meta.outputs.image }}:latest
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+
+  deploy:
+    needs: build
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull image
+        run: |
+          set -euo pipefail
+          REMOTE="${{ needs.build.outputs.image }}"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          docker pull "$REMOTE:$GITHUB_SHA"
+          docker logout "$REGISTRY" || true
+          docker image inspect "$IMAGE:latest" >/dev/null 2>&1 && docker image tag "$IMAGE:latest" "$IMAGE:previous" || true
+          docker image tag "$REMOTE:$GITHUB_SHA" "$IMAGE:latest"
+          docker image rm "$REMOTE:$GITHUB_SHA" >/dev/null 2>&1 || true
+      - name: Start geoproc + worker
         run: |
           test -f /home/ubuntu/flood_lab/lab.env || { echo "::error::/home/ubuntu/flood_lab/lab.env is missing (see deploy/server/lab.env.example)"; exit 1; }
           cp /home/ubuntu/flood_lab/lab.env deploy/server/lab.env
           sudo mkdir -p /data/lab && sudo chown 0:0 /data/lab
-          docker compose -f deploy/server/docker-compose.lab.yml up -d --build
+          docker compose -f deploy/server/docker-compose.lab.yml up -d --no-build --force-recreate
       - name: Health
         run: |
           for i in $(seq 1 20); do docker exec $(docker ps -qf name=geoproc-1 | head -1) python3 -c "import urllib.request,sys;print(urllib.request.urlopen('http://localhost:8000/internal/health',timeout=5).read().decode())" && exit 0; sleep 5; done
+          docker logs --tail 100 $(docker ps -aqf name=geoproc-1 | head -1) || true
           exit 1
+      - name: Prune
+        if: success()
+        run: docker image prune -f || true
