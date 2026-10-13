@@ -87,6 +87,21 @@ def test_district_files_in_epsg3035_are_matched_in_lon_lat(tmp_path, monkeypatch
     assert t.find_district(30.52, 50.45) is None
 
 
+def test_unexpected_error_becomes_a_failed_event(lab, monkeypatch):
+    tasks, sent = lab
+    from lab_service import worker
+
+    def boom(job, out_dir, report):
+        report({"status": "running", "progress_pct": 5, "stage": "starting", "error": None})
+        raise AssertionError("daemonic processes are not allowed to have children")
+
+    monkeypatch.setattr(worker, "execute", boom)
+    assert tasks.basin_delineation.run("j3", {"outlet_lon": 25.0, "outlet_lat": 48.5, "region": "5.3.2"}) == "failed"
+    assert [k["payload"]["status"] for _, k, _ in sent] == ["running", "failed"]
+    for _, k, _ in sent:
+        _ok(k)
+
+
 def test_contract_rejects_a_done_event_without_result():
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate({"job_id": "x", "payload": {"status": "done"}}, EVENT)

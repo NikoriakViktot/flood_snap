@@ -95,3 +95,25 @@ def test_basin_too_large(district, tmp_path, monkeypatch):
     wbt.set_verbose_mode(False)
     with pytest.raises(P.LabError, match="too large"):
         P.run_one(wbt, "fab_dem", district, *_lonlat(30, 40), tmp_path / "tmp")
+
+
+def test_wbt_readable_copies_out_of_paths_with_equals(tmp_path, monkeypatch):
+    """WhiteboxTools cannot open a path containing '=' (the staged terrain is under dem_source=<dem>/)."""
+    import os
+    import numpy as np
+    import rasterio
+    from rasterio.transform import from_origin
+    from lab_service import settings
+    monkeypatch.setattr(settings, "CACHE_ROOT", tmp_path / "cache")
+    d = tmp_path / "cache" / "dem_source=fab_dem" / "5_3_2"
+    d.mkdir(parents=True)
+    src = d / "d8.tif"
+    with rasterio.open(src, "w", driver="GTiff", height=512, width=512, count=1, dtype="uint8", crs="EPSG:3035",
+                       transform=from_origin(0, 512 * 30, 30, 30), tiled=True, blockxsize=256, blockysize=256, compress="deflate") as w:
+        w.write(np.arange(512 * 512, dtype="uint32").reshape(512, 512).astype("uint8"), 1)
+    out = P.wbt_readable(src)
+    assert "=" not in str(out) and out.name == "fab_dem__5_3_2__d8.tif"
+    with rasterio.open(out) as r, rasterio.open(src) as s:
+        assert (r.read(1) == s.read(1)).all()
+    t = os.stat(out).st_mtime_ns
+    assert P.wbt_readable(src) == out and os.stat(out).st_mtime_ns == t     # cached

@@ -27,8 +27,9 @@ class LabError(Exception):
 
 
 def _write(path: Path, arr: np.ndarray, transform, crs, nodata, dtype: str) -> Path:
+    # inputs of WhiteboxTools: plain stripped classic GeoTIFF (tens of MB per district, deleted with the job's _tmp)
     prof = dict(driver="GTiff", height=arr.shape[0], width=arr.shape[1], count=1, dtype=dtype, crs=crs, transform=transform,
-                nodata=nodata, compress="deflate", tiled=True, BIGTIFF="YES")
+                nodata=nodata, compress=None, tiled=False, BIGTIFF="IF_SAFER")
     with rasterio.open(path, "w", **prof) as d:
         d.write(np.ma.filled(arr, nodata).astype(dtype), 1)
     return path
@@ -63,6 +64,32 @@ def snap_outlet(streams_path: Path, lon: float, lat: float, snap_max_m: float) -
                 "shape": (H, W), "transform": s.transform, "crs": s.crs, "res": res}
 
 
+def wbt_readable(src: Path) -> Path:
+    """A copy of the district D8 that WhiteboxTools can open, made once and reused. WhiteboxTools splits its
+    `--arg='path'` on '=' and panics (whitebox-raster lib.rs:1361) on any path containing '=', and the staged terrain
+    lives under `dem_source=<dem>/` (found 2026-10-13). The copy goes to `<CACHE_ROOT>/wbt/<dem>__<slug>__<name>.tif`,
+    a stripped classic GeoTIFF, rebuilt when the source is newer (a re-staged district)."""
+    parts = src.parts
+    dem = next((x.split("=", 1)[1] for x in parts if x.startswith("dem_source=")), "dem")
+    dst = settings.CACHE_ROOT / "wbt" / f"{dem}__{src.parent.name}__{src.stem}.tif"
+    if "=" in str(dst):
+        raise LabError(f"the Lab cache path may not contain '=' (WhiteboxTools): {settings.CACHE_ROOT}")
+    if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
+        return dst
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_suffix(".tmp.tif")
+    with rasterio.open(src) as s:
+        prof = s.profile.copy()
+        prof.update(driver="GTiff", tiled=False, compress=None, BIGTIFF="IF_SAFER")
+        for k in ("blockxsize", "blockysize"):
+            prof.pop(k, None)
+        with rasterio.open(tmp, "w", **prof) as d:
+            for _, w in s.block_windows(1):
+                d.write(s.read(1, window=w), 1, window=w)
+    tmp.replace(dst)
+    return dst
+
+
 def watershed(wbt, d8_path: Path, snap: dict, tmp: Path) -> np.ndarray:
     """Boolean mask of the basin over the whole district grid (WBT watershed with a one-cell pour raster)."""
     H, W = snap["shape"]
@@ -72,7 +99,7 @@ def watershed(wbt, d8_path: Path, snap: dict, tmp: Path) -> np.ndarray:
     del pour
     ws_path = tmp / "watershed.tif"
     wbt.set_working_dir(str(tmp))
-    if wbt.watershed(str(d8_path), str(pour_path), str(ws_path)) != 0:
+    if wbt.watershed(str(wbt_readable(d8_path)), str(pour_path), str(ws_path)) != 0 or not ws_path.exists():
         raise RuntimeError("WhiteboxTools watershed failed")
     with rasterio.open(ws_path) as r:
         ws = r.read(1, masked=True)

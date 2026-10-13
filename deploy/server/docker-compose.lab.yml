@@ -23,7 +23,7 @@ services:
   # (python3 -m lab_service.worker: Redis list + HTTP callbacks) and the geoproc API above stay until that switch is done.
   geoproc-worker:
     image: geohydroai-lab:latest
-    command: ["celery", "-A", "lab_service.tasks", "worker", "-Q", "geoproc", "-c", "1", "--prefetch-multiplier", "1", "-n", "lab@%h", "--loglevel", "INFO"]
+    command: ["celery", "-A", "lab_service.tasks", "worker", "-Q", "geoproc", "-P", "solo", "--prefetch-multiplier", "1", "-n", "lab@%h", "--loglevel", "INFO"]
     healthcheck:
       test: ["CMD-SHELL", "celery -A lab_service.tasks inspect ping -d lab@$$HOSTNAME --timeout 10 | grep -q pong"]
       interval: 120s
