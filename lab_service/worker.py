@@ -58,6 +58,7 @@ def _child(job: dict, out_dir: str, conn) -> None:
                     f"({settings.STREAM_THRESHOLD_CELLS} cells, '{settings.STREAM_THRESHOLD_PRESET}')")
         for d, r in runs.items():
             (Path(out_dir) / f"basin_{d}.geojson").write_text(json.dumps({"type": "Feature", "properties": {"dem": d, **r["stats"]}, "geometry": r["basin"]}, ensure_ascii=False))
+        products = [product_of(d, runs[d], p) for d in settings.DEMS if runs[d].get("raster")]
         result = {"basin": a["basin"], "snapped_outlet": a["snapped_outlet"],
                   "stats": {"method": settings.METHOD, "region": p["region"], "district_slug": p["district_slug"], "district_name_ua": p.get("district_name_ua"),
                             "primary_dem": primary, "stream_threshold_cells": settings.STREAM_THRESHOLD_CELLS,
@@ -67,7 +68,7 @@ def _child(job: dict, out_dir: str, conn) -> None:
                             "by_dem": by_dem, "comparison": comparison}}
         (Path(out_dir) / "result.json").write_text(json.dumps(result, ensure_ascii=False))
         P.cleanup(Path(out_dir) / "_tmp")
-        conn.send(("done", result))
+        conn.send(("done", {"result": result, "products": products}))
     except P.LabError as e:
         conn.send(("failed", str(e)))
     except MemoryError:
@@ -77,6 +78,21 @@ def _child(job: dict, out_dir: str, conn) -> None:
         conn.send(("failed", f"{type(e).__name__}: {e}"))
     finally:
         conn.close()
+
+
+def product_of(dem: str, run: dict, params: dict) -> dict:
+    """A basin raster as a platform data product (contracts/job_event.v1.json `products[]`): the file travels in the
+    event (base64) and the platform stores it — the Lab keeps nothing the platform depends on."""
+    import base64
+    r = run["raster"]
+    w, s, e, n = r["bounds"]
+    return {"kind": "hand_basin", "name": f"HAND · {dem} · basin", "dem": dem, "media_type": "image/tiff",
+            "processing_version": settings.METHOD, "crs": "EPSG:3857", "resolution_m": r["ground_res_m"],
+            "bbox": {"type": "Polygon", "coordinates": [[[w, s], [e, s], [e, n], [w, n], [w, s]]]},
+            "stats": {"dem": dem, "bands": ["hand_dm", "channel"], "hand_unit": "dm", "nodata": 255,
+                      "width": r["width"], "height": r["height"], "bounds": r["bounds"]},
+            "source_attribution": "GeoHydroAI Flood Lab — national D8/HAND (2000 cells), " + ("FABDEM" if dem == "fab_dem" else "Copernicus GLO-30"),
+            "content_b64": base64.b64encode(r["bytes"]).decode("ascii")}
 
 
 def execute(job: dict, out_dir: str, report) -> dict:
@@ -106,7 +122,7 @@ def execute(job: dict, out_dir: str, report) -> dict:
     kind, payload = outcome
     if kind == "done":
         body = {"status": "done", "progress_pct": 100, "stage": "done", "error": None, "result_ref": f"lab:{job_id}",
-                "result": payload, "products": []}
+                "result": payload["result"], "products": payload["products"]}
     else:
         body = {"status": "failed", "progress_pct": 100, "stage": "failed", "error": payload, "result_ref": None,
                 "result": None, "products": []}
