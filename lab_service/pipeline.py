@@ -191,19 +191,26 @@ def run_one(wbt, dem: str, paths: dict[str, Path], lon: float, lat: float, tmp: 
             "snapped_outlet": {"type": "Point", "coordinates": [snap["lon"], snap["lat"]]}, "stats": stats}
 
 
-def compare(a: dict, b: dict) -> dict:
-    """FABDEM (a) vs Copernicus (b): IoU and area ratio in EPSG:3035, flood areas per level side by side."""
-    ga, gb = a["basin_3035"], b["basin_3035"]
-    union = ga.union(gb).area
-    iou = round(float(ga.intersection(gb).area / union), 4) if union > 0 else None
-    fa = {x["level_m"]: x["area_km2"] for x in a["stats"].get("flood_levels", [])}
-    fb = {x["level_m"]: x["area_km2"] for x in b["stats"].get("flood_levels", [])}
+def compare(primary: dict, secondary: dict) -> dict:
+    """FABDEM vs Copernicus: IoU and area ratio in EPSG:3035, flood areas per level side by side.
+
+    The named fields keep a fixed direction whichever DEM is primary: `area_ratio_fab_to_cop` = FAB / COP,
+    `relief_diff_m` and `diff_km2` = FAB − COP (before 2026-10-13 they were primary/secondary under a FAB→COP label,
+    i.e. inverted when Copernicus was primary). `secondary_basin` is the outline of the non-primary DEM."""
+    by = {primary["dem"]: primary, secondary["dem"]: secondary}
+    fab, cop = by.get("fab_dem", primary), by.get("copernicus_dem", secondary)
+    gf, gc = fab["basin_3035"], cop["basin_3035"]
+    union = gf.union(gc).area
+    iou = round(float(gf.intersection(gc).area / union), 4) if union > 0 else None
+    ff = {x["level_m"]: x["area_km2"] for x in fab["stats"].get("flood_levels", [])}
+    fc = {x["level_m"]: x["area_km2"] for x in cop["stats"].get("flood_levels", [])}
     return {"iou": iou,
-            "area_ratio_fab_to_cop": round(a["stats"]["area_km2"] / b["stats"]["area_km2"], 4) if b["stats"]["area_km2"] else None,
-            "relief_diff_m": (a["stats"].get("relief_m") or 0) - (b["stats"].get("relief_m") or 0),
-            "flood_area_diff_km2": [{"level_m": L, a["dem"]: fa.get(L), b["dem"]: fb.get(L),
-                                     "diff_km2": round(fa[L] - fb[L], 3) if L in fa and L in fb else None} for L in settings.LEVELS_M],
-            "secondary_basin": b["basin_simplified"]}
+            "primary_dem": primary["dem"], "secondary_dem": secondary["dem"],
+            "area_ratio_fab_to_cop": round(fab["stats"]["area_km2"] / cop["stats"]["area_km2"], 4) if cop["stats"]["area_km2"] else None,
+            "relief_diff_m": (fab["stats"].get("relief_m") or 0) - (cop["stats"].get("relief_m") or 0),
+            "flood_area_diff_km2": [{"level_m": L, fab["dem"]: ff.get(L), cop["dem"]: fc.get(L),
+                                     "diff_km2": round(ff[L] - fc[L], 3) if L in ff and L in fc else None} for L in settings.LEVELS_M],
+            "secondary_basin": secondary["basin_simplified"]}
 
 
 def cleanup(tmp: Path) -> None:
