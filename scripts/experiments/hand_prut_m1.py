@@ -6,7 +6,7 @@ stream-initiation thresholds, through the platform API (never through the tile s
       [--outlet 24.7598 48.1487 --region 5.3.2] [--dems fab_dem,copernicus_dem] [--thresholds 0.5,1,2,5] \
       [--out data/experiments/hand_prut_m1]
 
-Signs in with the e-mail given in --email (password asked interactively, never stored), builds or reuses the basin
+Signs in with the e-mail given in --email (password asked interactively or piped with --password-stdin, never stored), builds or reuses the basin
 delineation at the outlet, submits the HAND models (the API reuses identical finished models), polls the jobs, saves
 every product (COGs, PNGs, JSON) under --out/<dem>_<threshold>/ and prints a comparison table: timings, HAND
 mean/p90, share ≤ 1/2/3 m, stream length / links / density, slope mean, conditioning carve, exploratory area at 2 m.
@@ -143,9 +143,10 @@ def main() -> None:
     ap.add_argument("--dems", default="fab_dem,copernicus_dem")
     ap.add_argument("--thresholds", default="0.5,1,2,5")
     ap.add_argument("--out", default="data/experiments/hand_prut_m1")
+    ap.add_argument("--password-stdin", action="store_true", help="read the password from stdin (piped from a secrets file)")
     a = ap.parse_args()
     api = Api(a.base)
-    api.login(a.email, getpass.getpass("platform password: "))
+    api.login(a.email, sys.stdin.readline().strip() if a.password_stdin else getpass.getpass("platform password: "))
     basin = ensure_basin(api, a.project, a.outlet[0], a.outlet[1], a.region)
     out = Path(a.out)
     models = []
