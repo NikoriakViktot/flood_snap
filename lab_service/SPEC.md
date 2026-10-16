@@ -247,6 +247,23 @@ Tests: `tests/test_hand_pipeline.py` (synthetic 120×120 valley with analytic HA
 
 ---
 
+### 10.x Synthetic rating curves per reach (`hydrotable.json`, plan M2, 2026-10-16)
+
+Computed in the same job right after the reach table (`hand/src.py`, stage `rating`), product kind `hydrotable`
+(schema `geohydroai.hydrotable/v1`, compact JSON). FIM approach (NOAA OWP inundation-mapping v4.10, Apache-2.0):
+for every reach and every stage on the ladder 0 … `SRC_STAGE_MAX_M` (20 m) step `SRC_STAGE_STEP_M` (0.25 m), the cells of
+its catchment with HAND < stage give cells N, volume Σ(h − HAND)·a and bed area Σ a·√(1+tan²β); divided by the reach
+length: top width, wet area A, wetted perimeter P, R = A/P; Manning Q = A·R^(2/3)·S^(1/2)/n with n = `SRC_MANNING_N` (0.06)
+and S = the reach rise/run slope floored at `SRC_SLOPE_MIN` (0.001). The geometry re-implements TauDEM `catchhydrogeo`'s
+documented behaviour (no TauDEM/GPL code). Short reaches (catchment < 0.25 km² and length < 500 m) take the curve of the
+first non-short reach downstream (`src_from`). Each reach row also carries `to`, the link it flows into (0 = leaves the
+basin), added to `reaches.json`. If the table exceeds `HAND_PRODUCT_MAX_MB`, only Q(stage) is kept (`slim: true`).
+The settings are part of the hashed model configuration (`rating_curves`).
+
+Use: a discharge per reach → stage by linear interpolation on its curve, clamped at the ends (`src.stage_for`, as FIM
+`inundation.py`), then depth = stage − HAND over the reach catchment. Screening only: no bathymetry below the DEM water
+surface, one roughness, uniform flow, no backwater.
+
 ## 9. Verification
 
 ```bash

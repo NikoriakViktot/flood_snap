@@ -11,10 +11,18 @@ from lab_service.pipeline import LabError
 
 NAMES = {"hand": "HAND", "slope": "Slope", "dem_conditioning": "DEM conditioning (breached − original)",
          "stream_links": "Stream links", "catchments": "Reach catchments", "hand_png": "HAND (browser PNG)",
-         "hand_aux_png": "Slope + catchments (browser PNG)", "reaches": "Reach table", "model_config": "Model configuration",
+         "hand_aux_png": "Slope + catchments (browser PNG)", "reaches": "Reach table", "hydrotable": "Synthetic rating curves (per reach)",
+         "model_config": "Model configuration",
          "metadata": "Provenance metadata"}
 # what goes first when the event is over budget; the HAND COG itself is never dropped (the job fails instead)
-DROP_ORDER = ("dem_conditioning", "reaches", "hand_aux_png", "catchments", "stream_links", "slope", "hand_png")
+DROP_ORDER = ("dem_conditioning", "hydrotable", "reaches", "hand_aux_png", "catchments", "stream_links", "slope", "hand_png")
+
+
+def slim_hydrotable(t: dict) -> dict:
+    """the hydrotable without the per-stage geometry (wet area, top width, radius): Q(stage) is what turns a discharge
+    into a stage; the geometry can be recomputed from the HAND and catchment rasters"""
+    keep = {"wet_area_m2", "top_width_m", "hydraulic_radius_m"}
+    return {**t, "slim": True, "reaches": [{k: v for k, v in r.items() if k not in keep} for r in t["reaches"]]}
 
 
 def bbox_polygon(b) -> dict:
@@ -36,9 +44,15 @@ def products_of(params: dict, run: dict, files: dict, cfg: dict, meta: dict) -> 
                       "media_type": f["media_type"], "crs": f["crs"], "resolution_m": f["resolution_m"],
                       "bbox": bbox_polygon(f["bounds"]),
                       "stats": {**f["stats"], "hand_model": params.get("hand_model_id"), "bytes": len(data)}, "_bytes": data})
-    for kind, obj, fname in (("reaches", run["reaches"], "reaches.json"), ("model_config", cfg, "model_config.json"),
+    for kind, obj, fname in (("reaches", run["reaches"], "reaches.json"), ("hydrotable", run["hydrotable"], "hydrotable.json"),
+                             ("model_config", cfg, "model_config.json"),
                              ("metadata", meta, "metadata.json")):
-        data = json.dumps(obj, ensure_ascii=False, indent=1).encode()
+        # the hydrotable is large (stages × reaches): compact JSON, and only Q(stage) when the geometry does not fit
+        data = (json.dumps(obj, ensure_ascii=False, separators=(",", ":")) if kind == "hydrotable"
+                else json.dumps(obj, ensure_ascii=False, indent=1)).encode()
+        if kind == "hydrotable" and len(data) > settings.HAND_PRODUCT_MAX_MB * 2 ** 20:
+            obj = slim_hydrotable(obj)
+            data = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode()
         items.append({**common, "kind": kind, "name": f"{NAMES[kind]} · {label['label']} · {thr}", "file_name": fname,
                       "media_type": "application/json", "crs": "EPSG:3035", "resolution_m": None,
                       "bbox": bbox_polygon(run["bounds_4326"]),

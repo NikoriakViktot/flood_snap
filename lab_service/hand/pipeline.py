@@ -18,11 +18,13 @@ from rasterio.windows import Window
 
 from lab_service import pipeline as P
 from lab_service import settings
+from lab_service.hand import src as SRC
 
 NODATA = -9999.0
 LEVELS_M = tuple(range(1, 11))
 HIST_EDGES = np.arange(0, 20.5, 0.5)
-STAGES = {"terrain": 5, "watershed": 15, "conditioning": 30, "flow": 45, "hand": 55, "slope": 65, "statistics": 75, "packaging": 90}
+STAGES = {"terrain": 5, "watershed": 15, "conditioning": 30, "flow": 45, "hand": 55, "slope": 65, "statistics": 75, "rating": 82,
+          "packaging": 90}
 
 
 def _wbt(call, **kwargs) -> None:
@@ -162,6 +164,11 @@ def run_hand_model(wbt, dem: str, paths: dict[str, Path], params: dict, tmp: Pat
     stats = _summary(basin, valid, valid_dem, hand, slope, cond, cond_ok, streams, links, dem_c, res, area_km2, n_cells, snap,
                      edge_touch, window_clamped, len(reaches), warnings)
     lap("statistics")
+    progress("rating")
+    hydrotable = SRC.rating_curves(hand, catchments if aligned else np.zeros_like(catchments), slope, reaches, res, NODATA)
+    if not aligned:
+        warnings.append("no rating curves: catchments are not matched to the stream links")
+    lap("rating")
     hgt, wid = basin.shape
     bounds_3035 = [transform.c, transform.f + hgt * transform.e, transform.c + wid * transform.a, transform.f]
     bounds_4326 = [round(x, 6) for x in transform_bounds(crs, "EPSG:4326", *bounds_3035)]
@@ -169,6 +176,7 @@ def run_hand_model(wbt, dem: str, paths: dict[str, Path], params: dict, tmp: Pat
             "slope": slope, "cond": cond, "links": links, "catchments": catchments, "streams": streams, "stats": stats,
             "reaches": {"schema": "geohydroai.reaches/v1", "crs": crs.to_string(), "res_m": res, "slope_unit": "m/m",
                         "reaches": reaches},
+            "hydrotable": hydrotable,
             "window": {"rows": int(wr1 - wr0), "cols": int(wc1 - wc0), "buffer_m": settings.HAND_WINDOW_BUFFER_M,
                        "buffer_cells": buf, "clamped": window_clamped,
                        "bounds_3035": [wtransform.c, wtransform.f + (wr1 - wr0) * wtransform.e,
@@ -216,10 +224,13 @@ def _summary(basin, valid, valid_dem, hand, slope, cond, cond_ok, streams, links
 
 
 DIAGONAL = {1, 4, 16, 64}      # WhiteboxTools D8 pointer codes of the diagonal directions
+# WhiteboxTools D8 pointer code → (row, col) step: 1 NE, 2 E, 4 SE, 8 S, 16 SW, 32 W, 64 NW, 128 N
+D8_STEP = {1: (-1, 1), 2: (0, 1), 4: (1, 1), 8: (1, 0), 16: (1, -1), 32: (0, -1), 64: (-1, -1), 128: (-1, 0)}
 
 
 def _reaches(links, streams, acc, llen, d8, breached, res) -> list[dict]:
-    """One row per stream link inside the basin (M2/M3 hook: per-reach stages and synthetic rating curves).
+    """One row per stream link inside the basin (per-reach stages and synthetic rating curves build on it, hand/src.py).
+    `to` is the link the reach flows into (0: it leaves the basin).
     `length_m` is the link's path inside the basin (cell steps along the D8 pointer, diagonals × √2); `slope` =
     (highest − lowest breached elevation of those cells) / length_m — the breached DEM is monotone along a link, so
     the ends are its extremes. `length_link_m` is WhiteboxTools StreamLinkLength (the whole link, buffer included).
@@ -238,7 +249,10 @@ def _reaches(links, streams, acc, llen, d8, breached, res) -> list[dict]:
         z = z[z != NODATA]
         length_m = float(steps.ravel()[idx].sum())
         slope = float(z.max() - z.min()) / length_m if z.size and length_m > 0 else 0.0
-        out.append({"id": int(i), "cells": int(idx.size), "length_m": round(length_m, 1),
+        dr, dc = D8_STEP.get(int(d8[row, col]), (0, 0))
+        r2, c2 = row + dr, col + dc
+        to = int(links[r2, c2]) if (dr or dc) and 0 <= r2 < links.shape[0] and 0 <= c2 < width and on[r2, c2] else 0
+        out.append({"id": int(i), "to": to if to != int(i) else 0, "cells": int(idx.size), "length_m": round(length_m, 1),
                     "length_link_m": round(float(llen.ravel()[idx].max()), 1),
                     "slope": round(slope, 6), "slope_deg": round(math.degrees(math.atan(slope)), 4),
                     "drainage_area_km2": round(float(a.max()) * res * res / 1e6, 4),

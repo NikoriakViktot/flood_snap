@@ -45,8 +45,10 @@ def hand_child(job: dict, out_dir: str, conn) -> None:
         cfg = PV.model_config(job["job_id"], p, run, terrain.entry(p["dem"], p["district_slug"]), terrain.manifest(p["dem"]), ver)
         computed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         meta = PV.metadata(job["job_id"], p, run, cfg, files, ver, computed_at)
-        for name, obj in (("model_config.json", cfg), ("metadata.json", meta), ("reaches.json", run["reaches"])):
-            (out / name).write_text(json.dumps(obj, ensure_ascii=False, indent=1))
+        for name, obj in (("model_config.json", cfg), ("metadata.json", meta), ("reaches.json", run["reaches"]),
+                          ("hydrotable.json", run["hydrotable"])):
+            (out / name).write_text(json.dumps(obj, ensure_ascii=False, separators=(",", ":")) if name == "hydrotable.json"
+                                    else json.dumps(obj, ensure_ascii=False, indent=1))
         products, dropped = PR.products_of(p, run, files, cfg, meta)
         result = {"kind": "hand_model", "stats": run["stats"], "metadata": meta, "config_hash": cfg["config_hash"],
                   "snapped_outlet": run["snapped_outlet"], "dropped_products": dropped}

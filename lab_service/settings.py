@@ -42,6 +42,13 @@ HAND_MAX_BASIN_KM2 = float(os.environ.get("HAND_MAX_BASIN_KM2", "2000"))       #
 HAND_PNG_MAX_PIXELS = int(os.environ.get("HAND_PNG_MAX_PIXELS", "4000000"))     # browser PNG budget (z12 grid)
 HAND_PRODUCT_MAX_MB = float(os.environ.get("HAND_PRODUCT_MAX_MB", "8.5"))      # contract: content_b64 <= 12 M chars
 HAND_EVENT_MAX_MB = float(os.environ.get("HAND_EVENT_MAX_MB", "40"))           # all products of one done event
+# synthetic rating curves per reach (hand/src.py; FIM defaults: n 0.06, S_min 0.001, short = < 0.25 km² and < 500 m)
+SRC_MANNING_N = float(os.environ.get("SRC_MANNING_N", "0.06"))
+SRC_SLOPE_MIN = float(os.environ.get("SRC_SLOPE_MIN", "0.001"))
+SRC_STAGE_STEP_M = float(os.environ.get("SRC_STAGE_STEP_M", "0.25"))
+SRC_STAGE_MAX_M = float(os.environ.get("SRC_STAGE_MAX_M", "20"))
+SRC_MIN_CATCHMENT_KM2 = float(os.environ.get("SRC_MIN_CATCHMENT_KM2", "0.25"))
+SRC_MIN_LENGTH_M = float(os.environ.get("SRC_MIN_LENGTH_M", "500"))
 PNG_ZOOM = 12                                        # WebMercatorQuad zoom of the browser PNGs (future XYZ tiles align)
 LAB_IMAGE_TAG = os.environ.get("LAB_IMAGE_TAG", "")  # provenance: the image this worker runs
 DEM_LABELS = {
