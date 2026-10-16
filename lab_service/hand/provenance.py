@@ -72,6 +72,9 @@ def model_config(job_id: str, params: dict, run: dict, entry: dict, manifest: di
                   "slope": "(z_max - z_min) / length on the breached DEM"},
         "crs": "EPSG:3035", "res_m": run["res"],
         "png_grid": {"scheme": "WebMercatorQuad", "zoom": settings.PNG_ZOOM},
+        "rating_curves": {"method": "hand_src_manning", "manning_n": settings.SRC_MANNING_N, "slope_min": settings.SRC_SLOPE_MIN,
+                          "stage_step_m": settings.SRC_STAGE_STEP_M, "stage_max_m": settings.SRC_STAGE_MAX_M,
+                          "short_reach": [settings.SRC_MIN_CATCHMENT_KM2, settings.SRC_MIN_LENGTH_M]},
         "versions": {k: ver.get(k) for k in ("whitebox_tools", "gdal_cli", "rasterio", "rasterio_gdal", "numpy", "pillow", "python")},
     }
     return {**hashed, "config_hash": config_hash(hashed), "hashed_keys": sorted(hashed),

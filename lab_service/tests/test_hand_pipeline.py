@@ -106,8 +106,8 @@ def test_slope_streams_links_and_catchments(run):
     levels = [x["area_km2"] for x in st["flood_levels"]]
     # HAND ≤ 1 m: rows 58..62 (0, 0.5, 1.0 m) × 100 columns, minus the few tail cells east of the last stream cell
     assert levels == sorted(levels) and st["flood_levels"][0]["area_km2"] == pytest.approx(5 * 100 * 900 / 1e6, abs=0.02)
-    assert run["_stages"] == ["watershed", "conditioning", "flow", "hand", "slope", "statistics"]
-    assert set(run["timings_s"]) == {"watershed", "terrain", "conditioning", "flow", "hand", "slope", "statistics"}
+    assert run["_stages"] == ["watershed", "conditioning", "flow", "hand", "slope", "statistics", "rating"]
+    assert set(run["timings_s"]) == {"watershed", "terrain", "conditioning", "flow", "hand", "slope", "statistics", "rating"}
 
 
 def test_window_keeps_a_buffer_before_d8(run):
@@ -161,7 +161,7 @@ def test_package_and_products(run, tmp_path):
     assert meta["schema"] == "geohydroai.hand_model/v1" and meta["dem"]["vertical_datum"] == "EGM2008" and len(meta["products"]) == 7
     products, dropped = PR.products_of(_params(), run, files, cfg, meta)
     assert dropped == [] and [p["kind"] for p in products] == ["hand", "slope", "dem_conditioning", "stream_links", "catchments",
-                                                                 "hand_png", "hand_aux_png", "reaches", "model_config", "metadata"]
+                                                                 "hand_png", "hand_aux_png", "reaches", "hydrotable", "model_config", "metadata"]
     assert all(p["content_b64"] and p["file_name"] and p["processing_version"] == settings.PIPELINE_VERSION for p in products)
     assert json.loads(__import__("base64").b64decode(products[-1]["content_b64"]))["config_hash"] == cfg["config_hash"]
     assert products[0]["stats"]["hand_model"] == "m1" and products[5]["stats"]["encoding"] == "hand_rgba_v1"
@@ -178,10 +178,10 @@ def test_products_budget_drops_in_order(run, tmp_path, monkeypatch):
     sizes = {k: Path(f["path"]).stat().st_size for k, f in files.items()}
     jsons = {k: len(json.dumps(o, ensure_ascii=False, indent=1).encode()) for k, o in (("reaches", run["reaches"]), ("model_config", cfg), ("metadata", meta))}
     total = sum(sizes.values()) + sum(jsons.values())
-    # a budget that fits everything except the first two of the drop order
+    # a budget that fits everything except the first three of the drop order (the hydrotable is not counted in `total`)
     monkeypatch.setattr(settings, "HAND_EVENT_MAX_MB", (total - sizes["dem_conditioning"] - jsons["reaches"] + 1) / 2 ** 20)
     products, dropped = PR.products_of(_params(), run, files, cfg, meta)
-    assert dropped[:2] == ["dem_conditioning", "reaches"] and "hand" in [p["kind"] for p in products]
+    assert dropped[:3] == ["dem_conditioning", "hydrotable", "reaches"] and "hand" in [p["kind"] for p in products]
     assert any("size budget" in w for w in run["stats"]["quality"]["warnings"])
 
 
@@ -191,3 +191,16 @@ def test_png_budget_gives_cogs_only(run, tmp_path, monkeypatch):
     files = PK.package(run, tmp_path / "out")
     assert "hand_png" not in files and run["stats"]["delivery"] == "cog_only"
     assert any("COGs only" in w for w in run["stats"]["quality"]["warnings"])
+
+
+def test_rating_curves_per_reach(run):
+    t = run["hydrotable"]
+    ids = {r["id"] for r in run["reaches"]["reaches"]}
+    assert t["schema"] == "geohydroai.hydrotable/v1" and {r["id"] for r in t["reaches"]} == ids
+    for r in t["reaches"]:
+        q = np.array(r["discharge_m3s"])
+        assert len(q) == len(t["stages_m"]) and q[0] == 0 and (np.diff(q) >= -1e-9).all()
+    assert any(max(r["discharge_m3s"]) > 0 for r in t["reaches"])
+    assert "rating" in run["_stages"]
+    # every reach knows where it drains; the most downstream one leaves the basin
+    assert {r["to"] for r in run["reaches"]["reaches"]} <= ids | {0}
