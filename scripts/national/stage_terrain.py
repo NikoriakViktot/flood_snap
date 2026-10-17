@@ -24,9 +24,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data"
-FILES = ("d8.tif", "streams.tif", "hand.tif", "dem.tif")
-# staged where present (stage_dem_f32.py); the manifest lists them per district, lab_service checks `has()`
-OPTIONAL_FILES = ("dem_f32.tif",)
+FILES = ("d8.tif", "streams.tif", "dem.tif")
+# staged where present (stage_dem_f32.py); the manifest lists them per district, lab_service checks `has()`.
+# hand.tif (national HAND) is only in v1: from v2 HAND is built per basin in the Flood Lab, validated and published there.
+OPTIONAL_FILES = ("hand.tif", "dem_f32.tif")
 ENCODING = {
     "d8.tif": {"dtype": "uint8", "encoding": "wbt_d8_pointer", "nodata": 0, "note": "WhiteboxTools D8 pointer codes 1,2,4,…,128"},
     "streams.tif": {"dtype": "uint8", "nodata": 0, "note": "1 = stream cell, flow accumulation >= 2000 cells"},
@@ -63,10 +64,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dem", default="fab_dem")
     ap.add_argument("--threshold", type=int, default=2000)
+    ap.add_argument("--cuts", default="_districts", help="district cut lines (_districts_tb: with the foreign catchments)")
+    ap.add_argument("--suffix", default="", help="source hand_<threshold><suffix>")
+    ap.add_argument("--version", default="v1", help="national_terrain/<version> (v2: transboundary districts)")
     a = ap.parse_args()
-    src_root = DATA / "national" / a.dem / f"hand_{a.threshold}"
-    cuts = DATA / "national" / "_districts"
-    stage = DATA / "s3_staging" / "hydro" / "lake" / "national_terrain" / "v1"
+    src_root = DATA / "national" / a.dem / f"hand_{a.threshold}{a.suffix}"
+    cuts = DATA / "national" / a.cuts
+    stage = DATA / "s3_staging" / "hydro" / "lake" / "national_terrain" / a.version
     (stage / "_districts").mkdir(parents=True, exist_ok=True)
     index = json.loads((cuts / "index.json").read_text())
     shutil.copy2(cuts / "index.json", stage / "_districts" / "index.json")
@@ -88,10 +92,11 @@ def main():
             link(p, stage / f"dem_source={a.dem}" / d["slug"] / f)
             files[f] = {**ENCODING[f], "bytes": p.stat().st_size, "sha256": sha256(p)}
         run = json.loads((src / "run.json").read_text()) if (src / "run.json").exists() else {}
-        districts.append({"code": d["code"], "slug": d["slug"], "name_ua": d["name_ua"], "km2": d["km2"], "bbox_3035": bbox,
+        districts.append({"code": d["code"], "slug": d["slug"], "name_ua": d["name_ua"], "km2": d["km2"],
+                          "km2_abroad": d.get("km2_abroad", 0), "bbox_3035": bbox,
                           "shape": shape, "transform": transform, "files": files, "computed_at": run.get("created_at")})
         print(d["slug"], {f: round(files[f]["bytes"] / 1e6, 1) for f in files}, "MB", flush=True)
-    manifest = {"schema": "national_terrain.v1", "dem_source": a.dem, "crs": "EPSG:3035", "res_m": 30,
+    manifest = {"schema": "national_terrain.v1", "terrain_version": a.version, "districts_cut": a.cuts, "dem_source": a.dem, "crs": "EPSG:3035", "res_m": 30,
                 "stream_threshold_cells": a.threshold, "buffer_m": 3000,
                 "conditioning": "breach_depressions(fill_pits=True, flat_increment=0.001)", "flow_routing": "D8",
                 "optional_files": list(OPTIONAL_FILES),

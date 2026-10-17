@@ -28,7 +28,7 @@ def main():
     runs = {}
     if a.district_dir:
         d = Path(a.district_dir)
-        paths = {n: d / f"{n}.tif" for n in ("d8", "streams", "hand", "dem")}
+        paths = {n: d / f"{n}.tif" for n in ("d8", "streams", "hand", "dem") if (d / f"{n}.tif").exists()}
         runs["single"] = P.run_one(wbt, "single", paths, a.lon, a.lat, tmp / "single", progress=lambda s: print("..", s))
     else:
         from lab_service.terrain import TerrainStore

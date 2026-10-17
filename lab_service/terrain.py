@@ -1,7 +1,7 @@
 """The precomputed national terrain (scripts/national/stage_terrain.py) read from S3 through a disk cache.
 
 Layout: <prefix>/_districts/{index.json,<slug>.geojson}, <prefix>/dem_source=<dem>/manifest.json,
-<prefix>/dem_source=<dem>/<slug>/{d8,streams,hand,dem}.tif (+ dem_f32.tif where staged: Float32 DEM for HAND models). A district raster is downloaded on first use and kept
+<prefix>/dem_source=<dem>/<slug>/{d8,streams,dem}.tif (+ hand.tif in v1 only, + dem_f32.tif: Float32 DEM for HAND models). A district raster is downloaded on first use and kept
 under CACHE_ROOT; its sha256 from the manifest is checked once after the download. TERRAIN_LOCAL points at a local
 copy of the same tree (tests, the workstation) and bypasses S3.
 """
@@ -21,7 +21,10 @@ from shapely.prepared import prep
 
 from lab_service import settings
 
-FILES = ("d8", "streams", "hand", "dem")
+FILES = ("d8", "streams", "dem")
+# national HAND: only in terrain v1 (statistics of a delineated basin). From v2 (transboundary districts) HAND exists
+# only as a Flood Lab model of a basin — built, validated and published there.
+OPTIONAL = ("hand",)
 
 
 class TerrainMissing(RuntimeError):
@@ -160,7 +163,10 @@ class TerrainStore:
         self.evict()
         return dst
 
-    def paths(self, dem: str, slug: str, names: tuple[str, ...] = FILES) -> dict[str, Path]:
+    def paths(self, dem: str, slug: str, names: tuple[str, ...] | None = None) -> dict[str, Path]:
+        """Local paths of the district rasters; by default the required files plus the optional ones the manifest lists."""
+        if names is None:
+            names = FILES + tuple(n for n in OPTIONAL if self.has(dem, slug, n))
         return {n: self.ensure(dem, slug, n) for n in names}
 
     def cache_bytes(self) -> int:

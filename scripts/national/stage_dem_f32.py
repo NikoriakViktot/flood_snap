@@ -64,12 +64,14 @@ def main():
     ap.add_argument("--dem", choices=list(VRT), required=True)
     ap.add_argument("--threshold", type=int, default=2000)
     ap.add_argument("--root", default="/data/national")
+    ap.add_argument("--cuts", default="_districts", help="district cut lines under --root (_districts_tb: with the foreign catchments)")
+    ap.add_argument("--suffix", default="", help="output hand_<threshold><suffix> (e.g. _tb for the transboundary districts)")
     ap.add_argument("--only", default="", help="comma list of district slugs (e.g. 5_3_2)")
     ap.add_argument("--force", action="store_true", help="rebuild an existing dem_f32.tif")
     a = ap.parse_args()
-    cuts = Path(a.root) / "_districts"
+    cuts = Path(a.root) / a.cuts
     only = {c.strip() for c in a.only.split(",") if c.strip()}
-    base = Path(a.root) / a.dem / f"hand_{a.threshold}"
+    base = Path(a.root) / a.dem / f"hand_{a.threshold}{a.suffix}"
     for d in json.loads((cuts / "index.json").read_text()):
         if only and d["slug"] not in only:
             continue

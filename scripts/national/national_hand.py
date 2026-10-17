@@ -64,7 +64,7 @@ def district(a, d: dict, cuts: Path, work: Path, out: Path) -> dict:
     if not terrain_only:
         steps += [("d8_flow_accumulation", lambda: w.d8_flow_accumulation(str(br), str(acc), out_type="cells")),
                   ("extract_streams", lambda: w.extract_streams(str(acc), str(st), threshold=a.threshold, zero_background=False)),
-                  ("elevation_above_stream", lambda: w.elevation_above_stream(str(br), str(st), str(hand)))]
+                  ] + ([] if a.no_hand else [("elevation_above_stream", lambda: w.elevation_above_stream(str(br), str(st), str(hand)))])
     times = {}
     for name, fn in steps:
         s = time.time()
@@ -74,12 +74,12 @@ def district(a, d: dict, cuts: Path, work: Path, out: Path) -> dict:
     items = [(d8, "d8.tif", "0", ["-ot", "Byte", "-r", "near"]),
              (dem, "dem.tif", "-32768", ["-ot", "Int16", "-r", "near", "-srcnodata", "-9999"])]
     if not terrain_only:
-        items = [(hand, "hand.tif", "-9999", []), (st, "streams.tif", "0", [])] + items
+        items = ([] if a.no_hand else [(hand, "hand.tif", "-9999", [])]) + [(st, "streams.tif", "0", [])] + items
     _clip(a, d, cuts, out, items)
     prev = json.loads((out / "run.json").read_text()) if terrain_only and (out / "run.json").exists() else {}
-    run = {**prev, "district": d["code"], "name_ua": d["name_ua"], "km2": d["km2"], "dem": a.dem, "threshold_cells": a.threshold,
+    run = {**prev, "district": d["code"], "name_ua": d["name_ua"], "km2": d["km2"], "km2_abroad": d.get("km2_abroad", 0), "dem": a.dem, "threshold_cells": a.threshold,
            "crs": EPSG, "res_m": RES, "buffer_m": 3000, "seconds": round(time.time() - t0, 1),
-           "steps_s": {**prev.get("steps_s", {}), **times}, "terrain_version": "v1",
+           "steps_s": {**prev.get("steps_s", {}), **times}, "terrain_version": "v2" if a.cuts != "_districts" else "v1", "cuts": a.cuts,
            "files": {"hand.tif": {"dtype": "float32", "units": "m", "nodata": -9999}, "streams.tif": {"dtype": "uint8", "nodata": 0},
                      "d8.tif": {"dtype": "uint8", "encoding": "wbt_d8_pointer", "nodata": 0},
                      "dem.tif": {"dtype": "int16", "units": "m", "nodata": -32768}},
@@ -94,22 +94,25 @@ def main():
     ap.add_argument("--dem", choices=list(VRT), required=True)
     ap.add_argument("--threshold", type=int, default=2000)
     ap.add_argument("--root", default="/data/national")
+    ap.add_argument("--cuts", default="_districts", help="district cut lines under --root (_districts_tb: with the foreign catchments)")
+    ap.add_argument("--no-hand", action="store_true", help="terrain only (d8, streams, dem): HAND is built per basin in the Flood Lab, not nationally")
+    ap.add_argument("--suffix", default="", help="output hand_<threshold><suffix> (e.g. _tb for the transboundary districts)")
     ap.add_argument("--only", default="", help="comma list of district slugs (e.g. 5_3_3,M5_2)")
     ap.add_argument("--terrain-only", action="store_true", help="add d8.tif / dem.tif to districts that already have hand.tif")
     a = ap.parse_args()
-    cuts = Path(a.root) / "_districts"
+    cuts = Path(a.root) / a.cuts
     only = {c.strip() for c in a.only.split(",") if c.strip()}
-    base = Path(a.root) / a.dem / f"hand_{a.threshold}"
+    base = Path(a.root) / a.dem / f"hand_{a.threshold}{a.suffix}"
     for d in json.loads((cuts / "index.json").read_text()):                       # smallest first
         if only and d["slug"] not in only:
             continue
         out = base / d["slug"]
-        done = (out / "hand.tif").exists() and (not a.terrain_only or (out / "d8.tif").exists() and (out / "dem.tif").exists())
+        done = (out / ("streams.tif" if a.no_hand else "hand.tif")).exists() and (not a.terrain_only or (out / "d8.tif").exists() and (out / "dem.tif").exists())
         if done:
             print(f"skip {d['code']} (done)", flush=True)
             continue
         print(f"{d['code']} {d['name_ua']} {d['km2']:,} km² …", flush=True)
-        run = district(a, d, cuts, Path(a.root) / a.dem / "_hand_work" / d["slug"], out)
+        run = district(a, d, cuts, Path(a.root) / a.dem / f"_hand_work{a.suffix}" / d["slug"], out)
         print(f"  done in {run['seconds']:.0f} s {run['steps_s']}", flush=True)
 
 
