@@ -165,8 +165,7 @@ def run_one(wbt, dem: str, paths: dict[str, Path], lon: float, lat: float, tmp: 
             a = r.read(1, window=win, masked=True)
         return np.ma.array(a, mask=np.ma.getmaskarray(a) | ~mask)
 
-    hand = clip(paths["hand"])
-    hand = np.ma.masked_less(hand, 0)
+    hand = np.ma.masked_less(clip(paths["hand"]), 0) if "hand" in paths else None  # national HAND: terrain v1 only
     dem_c = clip(paths["dem"])
     streams = clip(paths["streams"]).filled(0) == 1
     orow, ocol = snap["row"] - rmin, snap["col"] - cmin
@@ -183,7 +182,7 @@ def run_one(wbt, dem: str, paths: dict[str, Path], lon: float, lat: float, tmp: 
                       "relief_m": int(elev.max() - elev.min())})
         q = np.quantile(elev, np.linspace(0, 1, 21))
         stats["hypsometry"] = [{"rel_area": round(1 - i / 20, 2), "rel_elev": round(float((q[i] - q[0]) / max(q[-1] - q[0], 1)), 3)} for i in range(21)]
-    hv = hand.compressed().astype(np.float64)
+    hv = hand.compressed().astype(np.float64) if hand is not None else np.empty(0)
     if hv.size:
         stats["hand_at_outlet_m"] = round(float(hand[orow, ocol]), 2) if not hand.mask[orow, ocol] else 0.0
         stats["mean_hand_m"] = round(float(hv.mean()), 2)

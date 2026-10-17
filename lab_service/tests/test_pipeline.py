@@ -72,6 +72,40 @@ def test_run_one_statistics_and_polygon(district, tmp_path):
     assert c["iou"] == pytest.approx(1.0) and c["area_ratio_fab_to_cop"] == 1.0
 
 
+def test_run_one_without_national_hand(district, tmp_path):
+    """Terrain v2 (transboundary districts) has no national hand.tif: the basin is delineated, HAND statistics are
+    simply absent (HAND is a Flood Lab model of the basin)."""
+    whitebox = pytest.importorskip("whitebox")
+    wbt = whitebox.WhiteboxTools()
+    wbt.set_verbose_mode(False)
+    paths = {k: v for k, v in district.items() if k != "hand"}
+    r = P.run_one(wbt, "copernicus_dem", paths, *_lonlat(30, 40), tmp_path / "tmp")
+    st = r["stats"]
+    assert st["cells"] == 20 and st["relief_m"] == 2 * 19
+    assert "flood_levels" not in st and "hand_hist" not in st and "mean_hand_m" not in st
+    c = P.compare(r, r)
+    assert c["iou"] == pytest.approx(1.0) and all(x["diff_km2"] is None for x in c["flood_area_diff_km2"])
+
+
+def test_terrain_paths_take_hand_only_where_staged(tmp_path, monkeypatch):
+    import json
+
+    from lab_service import settings
+    from lab_service.terrain import TerrainStore
+    root = tmp_path / "lake"
+    for slug, files in (("v1d", ["d8", "streams", "hand", "dem"]), ("v2d", ["d8", "streams", "dem"])):
+        (root / "dem_source=x" / slug).mkdir(parents=True)
+        for f in files:
+            (root / "dem_source=x" / slug / f"{f}.tif").write_bytes(b"1")
+    man = {"districts": [{"slug": s, "files": {f"{f}.tif": {"bytes": 1} for f in fs}}
+                         for s, fs in (("v1d", ["d8", "streams", "hand", "dem"]), ("v2d", ["d8", "streams", "dem"]))]}
+    (root / "dem_source=x" / "manifest.json").write_text(json.dumps(man))
+    monkeypatch.setattr(settings, "TERRAIN_LOCAL", str(root))
+    t = TerrainStore(tmp_path / "cache")
+    assert set(t.paths("x", "v1d")) == {"d8", "streams", "hand", "dem"}
+    assert set(t.paths("x", "v2d")) == {"d8", "streams", "dem"}
+
+
 def test_compare_direction_does_not_follow_the_primary():
     """area_ratio_fab_to_cop is FAB/COP even when Copernicus is the primary DEM."""
     from shapely.geometry import box
