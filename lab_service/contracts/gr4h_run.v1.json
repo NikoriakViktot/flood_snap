@@ -4,49 +4,258 @@
   "title": "geoproc.gr4h_run task kwargs",
   "description": "Canonical: geoai-django contracts/geoproc/gr4h_run.v1.json; vendored copy in flood_snap lab_service/contracts/. Sent by the platform to the queue `geoproc`: a CemaNeige-GR4H (airGR) run on one delineated basin with the given hourly forcing (whole UTC days, ≥ 1 year of warm-up before event.start), a published parameter set of a gauge (post_id) or inline sets, optionally an ensemble (parameter sets × within-block rain redistribution × depth factor), and optionally the HAND model's hydrotable to turn discharge into stages per reach.",
   "type": "object",
-  "required": ["job_id", "params"],
+  "required": [
+    "job_id",
+    "params"
+  ],
   "additionalProperties": false,
   "properties": {
-    "job_id": {"type": "string", "description": "the platform Job id (UUID); also the Celery task id"},
+    "job_id": {
+      "type": "string",
+      "description": "the platform Job id (UUID); also the Celery task id"
+    },
     "params": {
       "type": "object",
-      "required": ["runoff_run_id", "basin_id", "basin", "forcing", "event"],
+      "required": [
+        "runoff_run_id",
+        "basin_id",
+        "basin",
+        "forcing",
+        "event"
+      ],
       "properties": {
-        "runoff_run_id": {"type": "string"},
-        "basin_id": {"type": "string"},
-        "hand_model_id": {"type": ["string", "null"]},
-        "project_id": {"type": ["string", "null"]},
-        "post_id": {"type": ["string", "null"], "description": "gauge whose published parameter sets are used (lab_service/gr4h/params/<post_id>.json)"},
-        "basin": {
-          "type": "object", "required": ["lat", "z_mean_m", "hypso_m", "area_km2"],
-          "properties": {"lat": {"type": "number"}, "z_mean_m": {"type": "number"}, "area_km2": {"type": "number", "exclusiveMinimum": 0},
-                         "hypso_m": {"type": "array", "minItems": 101, "maxItems": 101, "items": {"type": "number"}}}
+        "runoff_run_id": {
+          "type": "string"
         },
-        "forcing": {
-          "type": "object", "required": ["time_start", "p_mm", "t_c"],
+        "basin_id": {
+          "type": "string"
+        },
+        "hand_model_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "post_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "gauge whose published parameter sets are used (lab_service/gr4h/params/<post_id>.json)"
+        },
+        "basin": {
+          "type": "object",
+          "required": [
+            "lat",
+            "z_mean_m",
+            "hypso_m",
+            "area_km2"
+          ],
           "properties": {
-            "time_start": {"type": "string", "description": "ISO-8601 UTC, 00:00 of the first day"},
-            "p_mm": {"type": "array", "items": {"type": ["number", "null"]}},
-            "t_c": {"type": "array", "items": {"type": ["number", "null"]}},
-            "pet_mm": {"type": ["array", "null"], "items": {"type": ["number", "null"]}, "description": "optional; Oudin from the daily mean temperature otherwise"},
-            "block_id": {"type": ["array", "null"], "items": {"type": ["string", "integer"]}, "description": "the observed accumulation block of each hour (12-h or 24-h); an ensemble redistributes rain only within a block"}
+            "lat": {
+              "type": "number"
+            },
+            "z_mean_m": {
+              "type": "number"
+            },
+            "area_km2": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "hypso_m": {
+              "type": "array",
+              "minItems": 101,
+              "maxItems": 101,
+              "items": {
+                "type": "number"
+              }
+            }
           }
         },
-        "forcing_source": {"type": ["string", "null"], "description": "e.g. climuad-f1 v20261011, icon_eu 2026-10-17T06Z"},
-        "event": {"type": "object", "required": ["start", "end"], "properties": {"start": {"type": "string"}, "end": {"type": "string"}}},
+        "time_step": {
+          "type": "string",
+          "enum": [
+            "1d",
+            "1h"
+          ],
+          "default": "1d",
+          "description": "1d = CemaNeige-GR4J, one forcing value per UTC day (the default); 1h = CemaNeige-GR4H, hourly over whole UTC days"
+        },
+        "forcing": {
+          "type": "object",
+          "required": [
+            "time_start",
+            "p_mm",
+            "t_c"
+          ],
+          "properties": {
+            "time_start": {
+              "type": "string",
+              "description": "ISO-8601 UTC, 00:00 of the first day"
+            },
+            "p_mm": {
+              "type": "array",
+              "items": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "t_c": {
+              "type": "array",
+              "items": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "pet_mm": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "description": "optional; Oudin from the daily mean temperature otherwise"
+            },
+            "block_id": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": [
+                  "string",
+                  "integer"
+                ]
+              },
+              "description": "the observed accumulation block of each hour (12-h or 24-h); an ensemble redistributes rain only within a block"
+            }
+          },
+          "description": "one value per step from 00:00 UTC of the first day: daily (time_step 1d, the default) or hourly over whole UTC days (1h); at least 365 days of warm-up before event.start"
+        },
+        "forcing_source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "e.g. climuad-f1 v20261011, icon_eu 2026-10-17T06Z"
+        },
+        "event": {
+          "type": "object",
+          "required": [
+            "start",
+            "end"
+          ],
+          "properties": {
+            "start": {
+              "type": "string"
+            },
+            "end": {
+              "type": "string"
+            }
+          }
+        },
         "parameters": {
-          "type": ["object", "null"],
-          "properties": {"version": {"type": "string"}, "source": {"type": "string"}, "transfer": {"type": "boolean"},
-                         "sets": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["id", "X1", "X2", "X3", "X4", "CNX1", "CNX2"]}}}
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "version": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "transfer": {
+              "type": "boolean"
+            },
+            "sets": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "X1",
+                  "X2",
+                  "X3",
+                  "X4",
+                  "CNX1",
+                  "CNX2"
+                ]
+              }
+            }
+          }
         },
         "members": {
-          "type": ["object", "null"],
-          "properties": {"mode": {"enum": ["reference", "ensemble"]}, "alphas": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}},
-                         "n_per_alpha": {"type": "integer", "minimum": 1}, "depth_factors": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}},
-                         "seed": {"type": "integer"}, "param_sets": {"enum": ["reference", "behavioural"]}}
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "reference",
+                "ensemble"
+              ]
+            },
+            "alphas": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "n_per_alpha": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "depth_factors": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "seed": {
+              "type": "integer"
+            },
+            "param_sets": {
+              "enum": [
+                "reference",
+                "behavioural"
+              ]
+            }
+          }
         },
-        "hydrotable": {"type": ["object", "null"], "description": "geohydroai.hydrotable/v1 (possibly slim)"},
-        "hydrotable_url": {"type": ["string", "null"], "description": "a signed URL of the HAND model's hydrotable product"}
+        "hydrotable": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "geohydroai.hydrotable/v1 (possibly slim)"
+        },
+        "hydrotable_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "a signed URL of the HAND model's hydrotable product"
+        }
       }
     }
   }

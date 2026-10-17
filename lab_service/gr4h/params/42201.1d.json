@@ -1,0 +1,96 @@
+{
+ "schema": "geohydroai.gr4h_params/v1",
+ "model": "CemaNeigeGR4J",
+ "time_step": "1d",
+ "post_id": "42201",
+ "name": "Ільця — Ільці",
+ "version": "prut-network-gr4j-climuad-2026-10-16",
+ "source": "geohydroai-storms 6f94f0d experiments/prut-network/calibrate_gr4j.R: airGR 1.7.9 Calibration_Michel, forcing ClimUAd P/T area-weighted over the FABDEM catchment (20:00→20:00 Kyiv day), split sample 1991-2005 / 2006-2020",
+ "note": "set 'reference' = KGE' calibrated on 2006-2020 (validated on 1991-2005); the other three are the remaining split-sample calibrations, used as the parameter ensemble. Calibrated on ClimUAd daily: other forcing is a transfer.",
+ "sets": [
+  {
+   "id": "reference",
+   "X1": 508.791542,
+   "X2": -1.05028,
+   "X3": 25.882842,
+   "X4": 1.179776,
+   "CNX1": 0.014769,
+   "CNX2": 5.963491,
+   "calibration": {
+    "scheme": "KGE'",
+    "period": [
+     "2006-01-01",
+     "2020-12-31"
+    ],
+    "kge2_cal": 0.717,
+    "nse_cal": 0.46,
+    "kge2_val": 0.557,
+    "nse_val": 0.375,
+    "validation": "1991-2005"
+   }
+  },
+  {
+   "id": "A_P1",
+   "X1": 0.008652,
+   "X2": -4.977362,
+   "X3": 71.553943,
+   "X4": 0.5,
+   "CNX1": 0.001001,
+   "CNX2": 3.550584,
+   "calibration": {
+    "scheme": "KGE'",
+    "period": [
+     "1991-01-01",
+     "2005-12-31"
+    ],
+    "kge2_cal": 0.673,
+    "nse_cal": 0.354,
+    "kge2_val": 0.606,
+    "nse_val": 0.079,
+    "validation": "2006-2020"
+   }
+  },
+  {
+   "id": "B_P2",
+   "X1": 1002.247242,
+   "X2": -1.335647,
+   "X3": 51.418601,
+   "X4": 1.105105,
+   "CNX1": 0.0,
+   "CNX2": 7.703561,
+   "calibration": {
+    "scheme": "NSE",
+    "period": [
+     "2006-01-01",
+     "2020-12-31"
+    ],
+    "kge2_cal": 0.601,
+    "nse_cal": 0.542,
+    "kge2_val": 0.407,
+    "nse_val": 0.37,
+    "validation": "1991-2005"
+   }
+  },
+  {
+   "id": "B_P1",
+   "X1": 871.311894,
+   "X2": -1.084677,
+   "X3": 30.265244,
+   "X4": 1.007508,
+   "CNX1": 0.001001,
+   "CNX2": 4.814743,
+   "calibration": {
+    "scheme": "NSE",
+    "period": [
+     "1991-01-01",
+     "2005-12-31"
+    ],
+    "kge2_cal": 0.51,
+    "nse_cal": 0.414,
+    "kge2_val": 0.672,
+    "nse_val": 0.481,
+    "validation": "2006-2020"
+   }
+  }
+ ]
+}

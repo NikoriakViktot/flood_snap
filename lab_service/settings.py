@@ -52,8 +52,17 @@ SRC_MIN_LENGTH_M = float(os.environ.get("SRC_MIN_LENGTH_M", "500"))
 PNG_ZOOM = 12                                        # WebMercatorQuad zoom of the browser PNGs (future XYZ tiles align)
 PNG_MIN_ZOOM = int(os.environ.get("PNG_MIN_ZOOM", "10"))  # large basins step down to this zoom before falling back to COGs only
 
-# -- GR4H runs (lab_service/gr4h): CemaNeige-GR4H (airGR) on a delineated basin, hourly, as a short-lived Rscript child --
-GR4H_PIPELINE_VERSION = "lab.gr4h.v1"
+# -- rainfall–runoff runs (lab_service/gr4h): CemaNeige-GR4J (daily, the default) or CemaNeige-GR4H (hourly), airGR, on a
+# delineated basin, as a short-lived Rscript child. The first model type of the Lab; others will be added.
+GR4H_PIPELINE_VERSION = "lab.gr4.v2"
+TIME_STEPS = ("1d", "1h")
+DEFAULT_TIME_STEP = "1d"   # owner, 2026-10-17: our hourly precipitation is too uncertain to be the default
+GR4J_MAX_RUN_DAYS = int(os.environ.get("GR4J_MAX_RUN_DAYS", "366"))           # daily: a season or a year
+GR4J_MAX_DAYS = int(os.environ.get("GR4J_MAX_DAYS", str(366 * 30)))           # daily forcing length
+# memory guard (all Lab tasks): the host's MemAvailable before a job starts; below it the job waits and is retried
+MIN_FREE_MEM_MB = int(os.environ.get("MIN_FREE_MEM_MB", "1536"))
+MEM_RETRY_S = int(os.environ.get("MEM_RETRY_S", "300"))
+MEM_RETRIES = int(os.environ.get("MEM_RETRIES", "4"))                         # 4 × 5 min = 20 min queued, then failed
 GR4H_MIN_WARMUP_DAYS = int(os.environ.get("GR4H_MIN_WARMUP_DAYS", "365"))      # initial states come from the warm-up, not the event
 GR4H_MAX_RUN_DAYS = int(os.environ.get("GR4H_MAX_RUN_DAYS", "31"))             # the event / forecast window
 GR4H_MAX_HOURS = int(os.environ.get("GR4H_MAX_HOURS", str(24 * 366 * 3)))     # forcing length

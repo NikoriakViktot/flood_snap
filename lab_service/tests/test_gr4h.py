@@ -1,4 +1,4 @@
-"""GR4H runs: the discharge → stage rule (identical to the browser's), request validation, and the job child's events
+"""GR4J (daily, default) / GR4H (hourly) runs: the discharge → stage rule (identical to the browser's), request validation, and the job child's events
 against the v1.2 contract with a fake Rscript (the real airGR run is covered by test_gr4h_r when Rscript is present)."""
 from __future__ import annotations
 
@@ -27,8 +27,12 @@ def _forcing(days=400, start="2019-01-01T00:00:00Z"):
     return {"time_start": start, "p_mm": [0.1] * n, "t_c": [5.0] * n, "pet_mm": None, "block_id": None}
 
 
+def _daily(days=400, start="2019-01-01T00:00:00Z"):
+    return {"time_start": start, "p_mm": [2.0] * days, "t_c": [5.0] * days, "pet_mm": None, "block_id": None}
+
+
 def _params(**over):
-    base = {"runoff_run_id": "r1", "basin_id": "b1", "hand_model_id": None, "project_id": "p1", "post_id": "42194",
+    base = {"runoff_run_id": "r1", "basin_id": "b1", "hand_model_id": None, "project_id": "p1", "post_id": "42194", "time_step": "1h",
             "basin": {"lat": 47.9, "z_mean_m": 1150.0, "hypso_m": [600 + 10 * i for i in range(101)], "area_km2": 552.0},
             "forcing": _forcing(), "event": {"start": "2020-01-20T00:00:00Z", "end": "2020-01-28T23:00:00Z"},
             "members": {"mode": "reference"}}
@@ -83,7 +87,8 @@ def test_input_contract_and_prepare():
     ({"forcing": _forcing(days=100), "event": {"start": "2019-03-01T00:00:00Z", "end": "2019-03-05T23:00:00Z"}}, "warm-up"),
     ({"forcing": _forcing(start="2019-01-01T06:00:00Z")}, "00:00 UTC"),
     ({"forcing": _forcing(days=460), "event": {"start": "2020-01-20T00:00:00Z", "end": "2020-03-01T00:00:00Z"}}, "longer than"),
-    ({"post_id": "00000"}, "no GR4H parameter set"),
+    ({"post_id": "00000"}, "no CemaNeigeGR4H parameter set"),
+    ({"time_step": "6h"}, "time_step must be"),
     ({"basin": {"lat": 47.9, "z_mean_m": 1150.0, "hypso_m": [1, 2, 3], "area_km2": 552.0}}, "101"),
     ({"members": {"mode": "ensemble", "alphas": [1, 4, 20], "n_per_alpha": 50, "depth_factors": [1, 1.25]}}, "above the limit"),
     ({"hydrotable": {"schema": "x"}}, "hydrotable"),
@@ -93,6 +98,35 @@ def test_prepare_rejects(over, msg):
     from lab_service.gr4h.validate import prepare_gr4h
     with pytest.raises(V.Rejected, match=msg):
         prepare_gr4h(_params(**over))
+
+
+def test_daily_is_the_default_with_gr4j_sets():
+    from lab_service.gr4h.validate import prepare_gr4h, published_posts
+    params = _params(forcing=_daily(), event={"start": "2020-01-20T00:00:00Z", "end": "2020-02-03T00:00:00Z"})
+    params.pop("time_step")
+    jsonschema.validate({"job_id": "j", "params": params}, INPUT)
+    p = prepare_gr4h(params)
+    assert p["time_step"] == "1d" and p["model"] == "CemaNeigeGR4J" and p["engine"] == "airgr-gr4j"
+    assert p["forcing"]["steps"] == 400 and p["forcing"]["hours"] == 9600
+    assert p["parameters"]["model"] == "CemaNeigeGR4J" and p["parameters"]["sets"][0]["id"] == "reference"
+    assert len(p["parameters"]["sets"]) == 4 and "42136" in published_posts("1d") and "42194" in published_posts("1h")
+    # a daily ensemble has no within-day timing: parameter sets × depth factors only
+    e = prepare_gr4h({**params, "members": {"mode": "ensemble", "alphas": [1, 4], "depth_factors": [1.0, 1.25]}})
+    assert e["members"]["alphas"] == []
+
+
+@pytest.mark.parametrize("over, msg", [
+    ({"forcing": _daily(days=200), "event": {"start": "2019-06-01T00:00:00Z", "end": "2019-06-10T00:00:00Z"}}, "warm-up"),
+    ({"forcing": _daily(days=800), "event": {"start": "2020-01-20T00:00:00Z", "end": "2021-02-01T00:00:00Z"}}, "longer than 366"),
+    ({"event": {"start": "2020-01-20T06:00:00Z", "end": "2020-01-25T00:00:00Z"}}, "whole days"),
+    ({"post_id": "42253"}, "no CemaNeigeGR4J parameter set"),
+])
+def test_daily_rejects(over, msg):
+    from lab_service import validate as V
+    from lab_service.gr4h.validate import prepare_gr4h
+    base = _params(time_step="1d", forcing=_daily(), event={"start": "2020-01-20T00:00:00Z", "end": "2020-01-31T00:00:00Z"})
+    with pytest.raises(V.Rejected, match=msg):
+        prepare_gr4h({**base, **over})
 
 
 def test_ensemble_member_count():
@@ -164,6 +198,24 @@ def test_child_done_event_matches_contract(tmp_path, monkeypatch):
     assert (tmp_path / "out" / "result.json").exists()
 
 
+def test_daily_child_products_say_gr4j_and_its_limits(tmp_path, monkeypatch):
+    from lab_service.gr4h.validate import prepare_gr4h
+    _fake_rscript(monkeypatch)
+    p = prepare_gr4h(_params(time_step="1d", forcing=_daily(), event={"start": "2020-01-20T00:00:00Z", "end": "2020-01-29T00:00:00Z"}))
+    events = _run_child(tmp_path, p)
+    assert events[-1][0] == "done", events[-1]
+    r = events[-1][1]["result"]
+    assert r["stats"]["time_step"] == "1d" and r["stats"]["steps"] == 10 and r["stats"]["hours"] == 240
+    hydro = json.loads(__import__("base64").b64decode(events[-1][1]["products"][0]["content_b64"]))
+    assert hydro["engine"] == "airgr-gr4j" and hydro["model"] == "CemaNeigeGR4J" and hydro["time_step"] == "1d"
+    assert hydro["time_utc"][0] == "2020-01-20T00:00:00Z" and hydro["time_utc"][1] == "2020-01-21T00:00:00Z"
+    assert "first model type" in hydro["statement"] and any("daily step" in x for x in hydro["limitations"])
+    assert any("2 vCPU" in x for x in hydro["limitations"])
+    # mm/day → m³/s over 552 km²: 0.01 mm/d is 0.0639 m³/s
+    assert abs(hydro["reference"][0] - 0.01 * 552e6 / 86400 / 1000) < 1e-3
+    assert r["metadata"]["model"] == "CemaNeigeGR4J" and r["metadata"]["warmup"]["steps"] == 390
+
+
 def test_child_reports_r_failure(tmp_path, monkeypatch):
     import subprocess
 
@@ -184,3 +236,15 @@ def test_real_airgr_reference_run(tmp_path):
     assert events[-1][0] == "done", events[-1]
     r = events[-1][1]["result"]
     assert r["stats"]["peak"]["reference_m3s"] > 1.0 and r["metadata"]["engine_version"] == "1.7.9"
+
+
+@pytest.mark.skipif(shutil.which("Rscript") is None, reason="R / airGR not installed (the lab image has them)")
+def test_real_airgr_daily_run(tmp_path):
+    from lab_service.gr4h.validate import prepare_gr4h
+    f = _daily(days=400)
+    f["p_mm"] = [1.0] * 400
+    f["p_mm"][384] = 80.0                    # 80 mm on the first day of the event
+    events = _run_child(tmp_path, prepare_gr4h(_params(time_step="1d", forcing=f, event={"start": "2020-01-20T00:00:00Z", "end": "2020-02-03T00:00:00Z"})))
+    assert events[-1][0] == "done", events[-1]
+    r = events[-1][1]["result"]
+    assert r["metadata"]["model"] == "CemaNeigeGR4J" and r["stats"]["peak"]["reference_m3s"] > 1.0

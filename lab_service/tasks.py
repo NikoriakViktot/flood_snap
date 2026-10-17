@@ -46,9 +46,28 @@ def emit(job_id: str, body: dict) -> None:
     app.send_task(EVENT_TASK, kwargs={"job_id": job_id, "payload": body}, queue=settings.PLATFORM_QUEUE)
 
 
-@app.task(name=BASIN_TASK)
-def basin_delineation(job_id: str, params: dict) -> str:
+def memory_gate(task, job_id: str) -> bool:
+    """True when the job may start. Short of memory: retry later (raises celery Retry), or after the last retry report
+    the job failed with a plain message and return False."""
+    from lab_service.memguard import BUSY_MESSAGE, short_of_memory
+    short, free = short_of_memory()
+    if not short:
+        return True
+    if task.request.retries < settings.MEM_RETRIES:
+        log.warning("job %s waits: MemAvailable %s MiB < %s MiB (retry %d/%d)", job_id, free, settings.MIN_FREE_MEM_MB,
+                    task.request.retries + 1, settings.MEM_RETRIES)
+        raise task.retry(countdown=settings.MEM_RETRY_S, max_retries=settings.MEM_RETRIES)
+    emit(job_id, {"status": "failed", "progress_pct": 100, "stage": "server_busy",
+                  "error": f"{BUSY_MESSAGE} (free {free} MiB, needs {settings.MIN_FREE_MEM_MB} MiB)",
+                  "result_ref": None, "result": None, "products": []})
+    return False
+
+
+@app.task(name=BASIN_TASK, bind=True)
+def basin_delineation(self, job_id: str, params: dict) -> str:
     from lab_service.worker import execute
+    if not memory_gate(self, job_id):
+        return "failed"
     try:
         prepared = V.prepare(params, TerrainStore())
     except (V.Rejected, V.Unavailable) as e:
@@ -65,13 +84,15 @@ def basin_delineation(job_id: str, params: dict) -> str:
         return "failed"
 
 
-@app.task(name=HAND_TASK)
-def hand_model(job_id: str, params: dict) -> str:
+@app.task(name=HAND_TASK, bind=True)
+def hand_model(self, job_id: str, params: dict) -> str:
     """HAND model of one delineated basin (contracts/hand_model.v1.json): the delineation's transport, the pipeline
     child is lab_service.hand.runner.hand_child."""
     from lab_service.hand import runner
     from lab_service.hand import validate as HV
     from lab_service.worker import execute
+    if not memory_gate(self, job_id):
+        return "failed"
     try:
         prepared = HV.prepare_hand(params, TerrainStore())
     except (V.Rejected, V.Unavailable) as e:
@@ -89,13 +110,16 @@ def hand_model(job_id: str, params: dict) -> str:
         return "failed"
 
 
-@app.task(name=GR4H_TASK)
-def gr4h_run(job_id: str, params: dict) -> str:
-    """CemaNeige-GR4H on one delineated basin (contracts/gr4h_run.v1.json): the hand_model's transport, the pipeline
-    child is lab_service.gr4h.runner.gr4h_child (airGR as a short-lived Rscript inside the memory-limited child)."""
+@app.task(name=GR4H_TASK, bind=True)
+def gr4h_run(self, job_id: str, params: dict) -> str:
+    """CemaNeige-GR4J (daily, default) or CemaNeige-GR4H (hourly) on one delineated basin (contracts/gr4h_run.v1.json):
+    the hand_model's transport, the pipeline child is lab_service.gr4h.runner.gr4h_child (airGR as a short-lived
+    Rscript inside the memory-limited child)."""
     from lab_service.gr4h import runner
     from lab_service.gr4h import validate as GV
     from lab_service.worker import execute
+    if not memory_gate(self, job_id):
+        return "failed"
     try:
         prepared = GV.prepare_gr4h(params)
     except (V.Rejected, V.Unavailable) as e:

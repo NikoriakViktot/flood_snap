@@ -24,14 +24,35 @@ from lab_service.pipeline import LabError
 
 log = logging.getLogger("lab")
 R_SCRIPT = Path(__file__).parent / "run.R"
-STATEMENT = ("Rainfall–runoff model scenario (CemaNeige-GR4H, airGR) driven by the given forcing: not a measurement, not the "
-             "official forecast of the Ukrainian Hydrometeorological Centre, and not a hydraulic model.")
-LIMITATIONS = [
+STATEMENT = ("Rainfall–runoff model scenario ({model}, airGR) driven by the given forcing: not a measurement, not the "
+             "official forecast of the Ukrainian Hydrometeorological Centre, and not a hydraulic model. The first model type "
+             "of the GeoHydroAI Flood Lab; other model types will be added.")
+LIMITATIONS_COMMON = [
     "lumped model: one precipitation and temperature series for the whole basin; local storms the forcing misses are missed",
     "parameters are a calibrated set for a gauge (or transferred from one), not identifiable from the event itself",
-    "the within-day rain distribution of ensemble members is sampled (Dirichlet), the depth factor is a scenario",
     "stages per reach come from HAND geometry with one Manning n (uniform flow): a screening estimate",
+    "runs on a small shared server (2 vCPU, ~8 GB RAM): one job at a time, ensemble size and run length are capped",
 ]
+LIMITATIONS_STEP = {
+    "1d": ["daily step: a flood peak inside the day is not resolved; the daily peak underestimates the instantaneous one "
+           "(compare with instantaneous maxima, not daily means)",
+           "the ensemble is parameter sets × depth factors only: there is no within-day timing at a daily step"],
+    "1h": ["hourly step from daily totals: the within-day rain distribution is not observed — evenly spread or sampled "
+           "(Dirichlet) in the ensemble; the depth factor is a scenario",
+           "parameters were calibrated on hourly forcing built from daily totals: treat hourly peaks as indicative"],
+}
+
+
+def statement(step: str, model: str) -> str:
+    return STATEMENT.format(model=model)
+
+
+def limitations(step: str) -> list[str]:
+    return LIMITATIONS_STEP[step] + LIMITATIONS_COMMON
+
+
+def _step_s(p: dict) -> int:
+    return 86400 if p.get("time_step", "1h") == "1d" else 3600
 STAGES = {"forcing": 10, "model": 25, "products": 80, "done": 100}
 
 
@@ -45,8 +66,8 @@ def _write_inputs(p: dict, wd: Path) -> None:
     with (wd / "forcing.csv").open("w", newline="") as fh:
         cols = ["time_utc", "P_mm", "T_C"] + (["PET_mm"] if f.get("pet_mm") is not None else []) + (["block_id"] if f.get("block_id") is not None else [])
         w = csv.writer(fh); w.writerow(cols)
-        for i in range(f["hours"]):
-            t = t0.timestamp() + 3600 * i
+        for i in range(f.get("steps", f["hours"])):
+            t = t0.timestamp() + _step_s(p) * i
             row = [datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), f["p_mm"][i] if f["p_mm"][i] is not None else 0.0,
                    f["t_c"][i] if f["t_c"][i] is not None else ""]
             if f.get("pet_mm") is not None:
@@ -57,23 +78,23 @@ def _write_inputs(p: dict, wd: Path) -> None:
     (wd / "params.json").write_text(json.dumps({"sets": p["parameters"]["sets"]}))
     b = p["basin"]
     ev = p["event"]
-    warm_end = (datetime.fromisoformat(ev["start"].replace("Z", "+00:00")).timestamp() - 3600)
+    warm_end = (datetime.fromisoformat(ev["start"].replace("Z", "+00:00")).timestamp() - _step_s(p))
     cfg = {"lat": b["lat"], "z_mean_m": b["z_mean_m"], "hypso_m": b["hypso_m"], "area_km2": b["area_km2"],
            "warmup_start": f["time_start"].replace("Z", "").replace("T", " "),
            "warmup_end": datetime.fromtimestamp(warm_end, tz=timezone.utc).strftime("%Y-%m-%d %H:%M"),
            "run_start": ev["start"].replace("Z", "").replace("T", " "), "run_end": ev["end"].replace("Z", "").replace("T", " "),
-           "members": p["members"]}
+           "members": p["members"], "time_step": p.get("time_step", "1h")}
     (wd / "config.json").write_text(json.dumps(cfg))
 
 
-def _read_qsim(wd: Path, area_km2: float) -> tuple[list[str], list[str], np.ndarray]:
+def _read_qsim(wd: Path, area_km2: float, step_s: int = 3600) -> tuple[list[str], list[str], np.ndarray]:
     with (wd / "qsim.csv").open() as fh:
         rows = list(csv.reader(fh))
     head, body = rows[0], rows[1:]
     time_utc = [r[0] for r in body]
     ids = head[1:]
-    q_mm = np.array([[float(x) for x in r[1:]] for r in body], dtype=float).T  # members × steps, mm/h
-    q_m3s = q_mm * area_km2 * 1e6 / 3600 / 1000
+    q_mm = np.array([[float(x) for x in r[1:]] for r in body], dtype=float).T  # members × steps, mm per step
+    q_m3s = q_mm * area_km2 * 1e6 / step_s / 1000
     return time_utc, ids, q_m3s
 
 
@@ -92,8 +113,11 @@ def hydrograph_product(p: dict, time_utc: list[str], members: list[dict], q: np.
     ref = q[0]
     peak_i = {k: int(np.argmax(v)) for k, v in pct.items()}
     full = q.size <= settings.GR4H_FULL_SERIES_MAX_VALUES
-    out = {"schema": "geohydroai.hydrograph/v1", "engine": "airgr-gr4h", "model": "CemaNeigeGR4H", "time_step": "1h",
-           "units": {"q": "m3/s", "p": "mm/h"}, "basin_area_km2": p["basin"]["area_km2"], "post_id": p.get("post_id"),
+    step = p.get("time_step", "1h")
+    step_s = _step_s(p)
+    model = p.get("model") or ("CemaNeigeGR4J" if step == "1d" else "CemaNeigeGR4H")
+    out = {"schema": "geohydroai.hydrograph/v1", "engine": p.get("engine") or ("airgr-gr4j" if step == "1d" else "airgr-gr4h"),
+           "model": model, "time_step": step, "units": {"q": "m3/s" + (" (daily mean)" if step == "1d" else ""), "p": "mm/d" if step == "1d" else "mm/h"}, "basin_area_km2": p["basin"]["area_km2"], "post_id": p.get("post_id"),
            "forcing_source": p.get("forcing_source"), "forcing_sha256": p["forcing"]["sha256"], "time_utc": time_utc,
            "reference": [round(float(x), 3) for x in ref],
            "p5": [round(float(x), 3) for x in pct["p5"]], "p50": [round(float(x), 3) for x in pct["p50"]], "p95": [round(float(x), 3) for x in pct["p95"]],
@@ -101,8 +125,8 @@ def hydrograph_product(p: dict, time_utc: list[str], members: list[dict], q: np.
            "members": [{**m, "peak_m3s": round(float(q[i].max()), 3), "peak_time": time_utc[int(np.argmax(q[i]))]} for i, m in enumerate(members)],
            "peak": {"reference_m3s": round(float(ref.max()), 3), "reference_time": time_utc[int(np.argmax(ref))],
                     **{f"{k}_m3s": round(float(v.max()), 3) for k, v in pct.items()}, **{f"{k}_time": time_utc[peak_i[k]] for k in pct},
-                    "volume_reference_mm": round(float(ref.sum() * 3600 / (p["basin"]["area_km2"] * 1e6) * 1000), 2)},
-           "statement": STATEMENT, "limitations": LIMITATIONS}
+                    "volume_reference_mm": round(float(ref.sum() * step_s / (p["basin"]["area_km2"] * 1e6) * 1000), 2)},
+           "statement": statement(step, model), "limitations": limitations(step)}
     if full:
         out["q_by_member"] = [[round(float(x), 2) for x in row] for row in q]
     else:
@@ -143,7 +167,10 @@ def gr4h_child(job: dict, out_dir: str, conn) -> None:
             tail = (r.stderr or r.stdout).strip().splitlines()[-6:]
             raise LabError("airGR run failed: " + " | ".join(tail))
         conn.send(("progress", STAGES["products"], "products"))
-        time_utc, ids, q = _read_qsim(wd, p["basin"]["area_km2"])
+        time_utc, ids, q = _read_qsim(wd, p["basin"]["area_km2"], _step_s(p))
+        step = p.get("time_step", "1h")
+        model = p.get("model") or ("CemaNeigeGR4J" if step == "1d" else "CemaNeigeGR4H")
+        engine = p.get("engine") or ("airgr-gr4j" if step == "1d" else "airgr-gr4h")
         members = _members(wd)
         versions = json.loads((wd / "versions.json").read_text())
         state = json.loads((wd / "state.json").read_text())
@@ -158,16 +185,19 @@ def gr4h_child(job: dict, out_dir: str, conn) -> None:
         param_sha = _sha(p["parameters"]["sets"])
         meta = {"schema": "geohydroai.gr4h_run/v1", "job_id": job["job_id"], "runoff_run_id": p.get("runoff_run_id"),
                 "basin_id": p.get("basin_id"), "hand_model_id": p.get("hand_model_id"), "project_id": p.get("project_id"),
-                "pipeline_version": settings.GR4H_PIPELINE_VERSION, "engine": "airgr-gr4h", "engine_version": versions.get("airGR"),
+                "pipeline_version": settings.GR4H_PIPELINE_VERSION, "engine": engine, "model": model, "engine_version": versions.get("airGR"),
                 "r_version": versions.get("R"), "image": settings.LAB_IMAGE_TAG, "computed_at": computed_at,
-                "time_step": "1h", "event": p["event"], "warmup": {"start": p["forcing"]["time_start"], "hours": int(p["forcing"]["hours"]) - len(time_utc)},
-                "forcing": {"source": p.get("forcing_source"), "sha256": p["forcing"]["sha256"], "hours": p["forcing"]["hours"], "pet": versions.get("pet")},
+                "time_step": step, "event": p["event"],
+                "warmup": {"start": p["forcing"]["time_start"], "steps": int(p["forcing"].get("steps", p["forcing"]["hours"])) - len(time_utc),
+                           "hours": int(p["forcing"]["hours"]) - len(time_utc) * _step_s(p) // 3600},
+                "forcing": {"source": p.get("forcing_source"), "sha256": p["forcing"]["sha256"], "hours": p["forcing"]["hours"],
+                            "steps": p["forcing"].get("steps", p["forcing"]["hours"]), "pet": versions.get("pet")},
                 "parameters": {"version": p["parameters"].get("version") or p.get("post_id"), "source": p["parameters"].get("source"),
                                "sets": len(p["parameters"]["sets"]), "sha256": param_sha, "transfer": p["parameters"].get("transfer", False)},
                 "initial_state": {**state, "id": _sha(state)},
                 "members": p["members"], "members_n": len(members),
-                "statement": STATEMENT, "limitations": LIMITATIONS}
-        config_hash = _sha({"forcing": p["forcing"]["sha256"], "parameters": param_sha, "event": p["event"], "members": p["members"],
+                "statement": statement(step, model), "limitations": limitations(step)}
+        config_hash = _sha({"forcing": p["forcing"]["sha256"], "parameters": param_sha, "event": p["event"], "members": p["members"], "time_step": step,
                             "basin": {k: p["basin"][k] for k in ("lat", "z_mean_m", "area_km2")}, "pipeline": settings.GR4H_PIPELINE_VERSION})
         meta["config_hash"] = config_hash
         products_obj["model_metadata"] = (meta, "model_metadata.json")
@@ -181,12 +211,13 @@ def gr4h_child(job: dict, out_dir: str, conn) -> None:
                 data = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode()
             if len(data) > settings.HAND_PRODUCT_MAX_MB * 2 ** 20:
                 raise LabError(f"the {kind} product is {len(data) / 2 ** 20:.1f} MB, above the inline limit")
-            products.append({"kind": kind, "name": f"{kind.replace('_', ' ')} · GR4H · {p.get('post_id') or p.get('basin_id')}",
+            label = "GR4J" if step == "1d" else "GR4H"
+            products.append({"kind": kind, "name": f"{kind.replace('_', ' ')} · {label} · {p.get('post_id') or p.get('basin_id')}",
                              "file_name": fname, "media_type": "application/json", "processing_version": settings.GR4H_PIPELINE_VERSION,
                              "crs": "EPSG:4326", "resolution_m": None, "stats": {"runoff_run": p.get("runoff_run_id"), "bytes": len(data)},
-                             "source_attribution": f"GeoHydroAI Flood Lab GR4H {settings.GR4H_PIPELINE_VERSION} — airGR {versions.get('airGR')} (INRAE)",
+                             "source_attribution": f"GeoHydroAI Flood Lab {model} {settings.GR4H_PIPELINE_VERSION} — airGR {versions.get('airGR')} (INRAE)",
                              "license": "model output; airGR GPL-2", "content_b64": base64.b64encode(data).decode("ascii")})
-        stats = {"members_n": len(members), "hours": len(time_utc), "peak": hydro["peak"],
+        stats = {"members_n": len(members), "time_step": step, "steps": len(time_utc), "hours": len(time_utc) * _step_s(p) // 3600, "peak": hydro["peak"],
                  "stage_table": bool(stage_tbl), "low_confidence_reaches": len(stage_tbl["low_confidence_reaches"]) if stage_tbl else None}
         result = {"kind": "gr4h_run", "stats": stats, "metadata": meta, "config_hash": config_hash, "dropped_products": []}
         (out / "result.json").write_text(json.dumps(result, ensure_ascii=False))
