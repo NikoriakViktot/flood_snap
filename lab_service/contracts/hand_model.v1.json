@@ -19,7 +19,23 @@
         "region": {"type": "string", "description": "river-basin district code, e.g. 5.3.2"},
         "dem": {"enum": ["fab_dem", "copernicus_dem"]},
         "stream_threshold_km2": {"enum": [0.5, 1, 2, 5], "description": "stream-initiation threshold (sensitivity options, not recommended values)"},
-        "project_id": {"type": ["string", "null"]}
+        "project_id": {"type": ["string", "null"]},
+        "reuse": {
+          "type": "array", "maxItems": 64,
+          "description": "v1.1 (2026-10-17): finished HAND models of sub-basins (same DEM, threshold and district; outlet inside this basin) the worker may paste instead of computing their area (flood_snap lab_service/hand/reuse.py). The worker checks each against the current terrain and method and records what it used or skipped in stats.reuse. Absent or empty: everything is computed.",
+          "items": {
+            "type": "object",
+            "required": ["hand_model_id", "outlet"],
+            "properties": {
+              "hand_model_id": {"type": "string"},
+              "job_id": {"type": ["string", "null"], "description": "its job: the worker first looks for the files in its own job folder"},
+              "outlet": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2, "description": "[lon, lat] of its snapped outlet"},
+              "cells": {"type": ["integer", "null"], "description": "cell count of its basin (stats.cells): a mismatch on the current terrain drops it"},
+              "files": {"type": "object", "description": "signed URLs by product kind: hand, dem_conditioning, stream_links, catchments, reaches, model_config",
+                        "additionalProperties": {"type": "string"}}
+            }
+          }
+        }
       }
     }
   }

@@ -28,4 +28,30 @@ def prepare_hand(params: dict, terrain) -> dict:
         raise V.Unavailable(f"the Float32 DEM ({dem}) is not staged for district {district.code} ({district.name_ua}) yet: "
                             "HAND models need it (scripts/national/stage_dem_f32.py)")
     return {**params, "dem": dem, "stream_threshold_km2": float(thr), "stream_threshold_cells": threshold_cells(float(thr)),
-            "region": district.code, "district_slug": district.slug, "district_name_ua": district.name_ua}
+            "region": district.code, "district_slug": district.slug, "district_name_ua": district.name_ua,
+            "reuse": check_reuse(params.get("reuse"))}
+
+
+def check_reuse(value) -> list[dict]:
+    """The offered sub-basin models (contracts/hand_model.v1.json `reuse`): shape only; hand/reuse.py checks the rest."""
+    if value in (None, []):
+        return []
+    if not isinstance(value, list) or len(value) > 64:
+        raise V.Rejected("reuse must be a list of at most 64 sub-basin models")
+    out = []
+    for c in value:
+        if not isinstance(c, dict) or not isinstance(c.get("hand_model_id"), str):
+            raise V.Rejected("reuse[]: hand_model_id is required")
+        o = c.get("outlet")
+        if (not isinstance(o, list) or len(o) != 2 or not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in o)
+                or not (-180 <= o[0] <= 180 and -90 <= o[1] <= 90)):
+            raise V.Rejected("reuse[]: outlet must be [lon, lat]")
+        files = c.get("files") or {}
+        if not isinstance(files, dict) or not all(isinstance(u, str) and u.startswith(("https://", "http://")) for u in files.values()):
+            raise V.Rejected("reuse[]: files must map product kinds to http(s) URLs")
+        cells = c.get("cells")
+        if cells is not None and (isinstance(cells, bool) or not isinstance(cells, int) or cells < 1):
+            raise V.Rejected("reuse[]: cells must be a positive integer")
+        out.append({"hand_model_id": c["hand_model_id"], "job_id": c.get("job_id"), "outlet": [float(o[0]), float(o[1])],
+                    "cells": cells, "files": files})
+    return out

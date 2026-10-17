@@ -38,11 +38,19 @@ def hand_child(job: dict, out_dir: str, conn) -> None:
 
         progress("terrain")
         paths = terrain.paths(p["dem"], p["district_slug"], ("d8", "streams", "dem_f32"))
-        run = HP.run_hand_model(wbt, p["dem"], paths, p, out / "_tmp", progress)
+        entry = terrain.entry(p["dem"], p["district_slug"])
+        ver = PV.versions(wbt)
+        reuse, skipped = None, []
+        if p.get("reuse"):
+            from lab_service.hand import reuse as RU
+            loaded, skipped = RU.fetch(p["reuse"], out / "_tmp")
+            reuse, more = RU.compatible(loaded, PV.compat_config(p, entry, HP.terrain_res(paths)))
+            skipped += more
+        run = HP.run_hand_model(wbt, p["dem"], paths, {k: v for k, v in p.items() if k != "reuse"}, out / "_tmp", progress,
+                                reuse=reuse, reuse_skipped=skipped)
         progress("packaging")
         files = PK.package(run, out)
-        ver = PV.versions(wbt)
-        cfg = PV.model_config(job["job_id"], p, run, terrain.entry(p["dem"], p["district_slug"]), terrain.manifest(p["dem"]), ver)
+        cfg = PV.model_config(job["job_id"], p, run, entry, terrain.manifest(p["dem"]), ver)
         computed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         meta = PV.metadata(job["job_id"], p, run, cfg, files, ver, computed_at)
         for name, obj in (("model_config.json", cfg), ("metadata.json", meta), ("reaches.json", run["reaches"]),
@@ -51,7 +59,7 @@ def hand_child(job: dict, out_dir: str, conn) -> None:
                                     else json.dumps(obj, ensure_ascii=False, indent=1))
         products, dropped = PR.products_of(p, run, files, cfg, meta)
         result = {"kind": "hand_model", "stats": run["stats"], "metadata": meta, "config_hash": cfg["config_hash"],
-                  "snapped_outlet": run["snapped_outlet"], "dropped_products": dropped}
+                  "snapped_outlet": run["snapped_outlet"], "dropped_products": dropped, "footprint": HP.footprint(run)}
         (out / "result.json").write_text(json.dumps(result, ensure_ascii=False))
         P.cleanup(out / "_tmp")
         conn.send(("done", {"result": result, "products": products}))

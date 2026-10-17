@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "geoproc/job_event.v1",
   "title": "platform.geoproc_event task kwargs",
-  "description": "Canonical: geoai-django contracts/geoproc/job_event.v1.json; vendored copy in flood_snap lab_service/contracts/. Sent by a geoprocessing worker to the platform queue after every state change. v1.2 (2026-10-17): result.kind (basin_delineation | hand_model | gr4h_run), result.metadata / config_hash, products[].file_name / license; a done event always carries result.stats, result.basin only for a basin delineation.",
+  "description": "Canonical: geoai-django contracts/geoproc/job_event.v1.json; vendored copy in flood_snap lab_service/contracts/. Sent by a geoprocessing worker to the platform queue after every state change. v1.2 (2026-10-17): result.kind (basin_delineation | hand_model | gr4h_run), result.metadata / config_hash, products[].file_name / license; a done event always carries result.stats, result.basin only for a basin delineation. v1.3 (2026-10-17): result.footprint of a hand_model; result.stats.reuse when sub-basin models were offered.",
   "type": "object",
   "required": ["job_id", "payload"],
   "additionalProperties": false,
@@ -26,7 +26,8 @@
             "stats": {"type": "object"},
             "metadata": {"type": "object", "description": "hand_model: the provenance package (metadata.json)"},
             "config_hash": {"type": "string", "description": "hand_model: sha256 of the hashed configuration"},
-            "dropped_products": {"type": "array", "items": {"type": "string"}}
+            "dropped_products": {"type": "array", "items": {"type": "string"}},
+            "footprint": {"type": "object", "description": "hand_model (v1.3): GeoJSON (EPSG:4326) polygon of the cells the model covers, for the platform's registry of built models"}
           }
         },
         "products": {
