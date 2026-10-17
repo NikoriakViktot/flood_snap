@@ -53,33 +53,43 @@ def config_hash(cfg: dict) -> str:
     return hashlib.sha256(json.dumps(cfg, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
+CONDITIONING = {"tool": "breach_depressions", "fill_pits": True, "flat_increment": 0.001}
+
+
+def compat_config(params: dict, entry: dict, res_m: float) -> dict:
+    """The configuration keys that must match for a sub-basin model to be reused (hand/reuse.py COMPAT_KEYS)."""
+    return {"pipeline_version": settings.PIPELINE_VERSION, "dem": params["dem"],
+            "dem_f32_sha256": (entry.get("files", {}).get("dem_f32.tif") or {}).get("sha256"),
+            "district_slug": params["district_slug"], "stream_threshold_cells": params["stream_threshold_cells"],
+            "conditioning": CONDITIONING, "flow_routing": "D8", "hand_tool": "elevation_above_stream", "res_m": res_m}
+
+
 def model_config(job_id: str, params: dict, run: dict, entry: dict, manifest: dict, ver: dict) -> dict:
     """Every parameter that determines the result (hashed → config_hash) plus the ids (not hashed)."""
     hashed = {
-        "pipeline_version": settings.PIPELINE_VERSION,
-        "dem": params["dem"],
-        "dem_f32_sha256": (entry.get("files", {}).get("dem_f32.tif") or {}).get("sha256"),
+        **compat_config(params, entry, run["res"]),
         "terrain_schema": manifest.get("schema"),
         "terrain_manifest_created_at": manifest.get("created_at"),
-        "region": params["region"], "district_slug": params["district_slug"],
+        "region": params["region"],
         "outlet_snapped": run["snapped_outlet"]["coordinates"],
-        "stream_threshold_km2": params["stream_threshold_km2"], "stream_threshold_cells": params["stream_threshold_cells"],
+        "stream_threshold_km2": params["stream_threshold_km2"],
         "window_buffer_m": settings.HAND_WINDOW_BUFFER_M,
-        "conditioning": {"tool": "breach_depressions", "fill_pits": True, "flat_increment": 0.001},
-        "flow_routing": "D8", "streams_tool": "extract_streams", "hand_tool": "elevation_above_stream",
+        "streams_tool": "extract_streams",
         "slope": {"tool": "slope", "units": "degrees", "source": "original_dem"},
         "links": {"ids": "stream_link_identifier", "catchments": "subbasins", "length": "stream_link_length",
                   "slope": "(z_max - z_min) / length on the breached DEM"},
-        "crs": "EPSG:3035", "res_m": run["res"],
+        "crs": "EPSG:3035",
         "png_grid": {"scheme": "WebMercatorQuad", "zoom": settings.PNG_ZOOM},
         "rating_curves": {"method": "hand_src_manning", "manning_n": settings.SRC_MANNING_N, "slope_min": settings.SRC_SLOPE_MIN,
                           "stage_step_m": settings.SRC_STAGE_STEP_M, "stage_max_m": settings.SRC_STAGE_MAX_M,
                           "short_reach": [settings.SRC_MIN_CATCHMENT_KM2, settings.SRC_MIN_LENGTH_M]},
         "versions": {k: ver.get(k) for k in ("whitebox_tools", "gdal_cli", "rasterio", "rasterio_gdal", "numpy", "pillow", "python")},
     }
+    # the reused sub-basin models are not hashed: the result is the same as computing their area (hand/reuse.py)
+    reused = [m["hand_model_id"] for m in ((run.get("stats") or {}).get("reuse") or {}).get("models", [])]
     return {**hashed, "config_hash": config_hash(hashed), "hashed_keys": sorted(hashed),
             "hand_model_id": params.get("hand_model_id"), "job_id": job_id, "basin_id": params.get("basin_id"),
-            "project_id": params.get("project_id")}
+            "project_id": params.get("project_id"), "reused_models": reused}
 
 
 def metadata(job_id: str, params: dict, run: dict, cfg: dict, files: dict, ver: dict, computed_at: str) -> dict:
