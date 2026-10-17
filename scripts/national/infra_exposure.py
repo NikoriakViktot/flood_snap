@@ -15,7 +15,8 @@ Population (WorldPop 2020 100 m constrained): every pixel's people counted in it
 A HAND mask is a screening: the ground lies within L metres above the nearest stream — not a flood depth, not a probability.
 
 Outputs (data/s3_staging/hydro/lake/exposure/v1/):
-  critical_sites/critical_sites.parquet, bridges/bridges.parquet, roads/part-NNN.parquet   GeoParquet EPSG:4326
+  critical_sites/critical_sites.parquet, bridges/bridges.parquet, roads/roads.parquet   EPSG:4326 (roads / bridges
+                                   sorted by pcode so a hromada reads one slice)
   infra_hromadas/stats.parquet     per hromada: critical sites (total, by category, in HAND ≤ 2 / 5 m), bridges (total, in
                                    HAND ≤ 1 / 2 / 5 m), road km (total, main roads rank ≤ 3, in HAND ≤ 1 / 2 / 3 / 5 / 10 m),
                                    people (total, in HAND ≤ 1 / 2 / 3 / 5 / 10 m FABDEM, ≤ 2 / 5 m Copernicus)
@@ -111,7 +112,7 @@ def do_bridges(adm3) -> pd.DataFrame:
     g["pcode"] = hromada_of(gpd.GeoSeries(shapely.line_interpolate_point(g.geometry.values, 0.5, normalized=True), crs=4326), adm3)
     out = LAKE / "bridges"
     out.mkdir(parents=True, exist_ok=True)
-    g.to_parquet(out / "bridges.parquet", index=False)
+    g.sort_values("pcode").to_parquet(out / "bridges.parquet", index=False, row_group_size=5000)
     log("bridges", len(g))
     return pd.DataFrame(g.drop(columns="geometry"))
 
@@ -155,6 +156,14 @@ def do_roads(adm3) -> pd.DataFrame:
         gc.collect()
     del samplers
     gc.collect()
+    # one file sorted by hromada (row groups of 20 000) so a hromada's roads are one slice for the Hydro API
+    import duckdb
+    con = duckdb.connect()
+    con.execute(f"COPY (SELECT * FROM read_parquet('{out.as_posix()}/part-*.parquet') ORDER BY pcode, rank) TO "
+                f"'{(out / 'roads.parquet').as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 20000)")
+    con.close()
+    for p in out.glob("part-*.parquet"):
+        p.unlink()
     return pd.concat(stats, ignore_index=True)
 
 
@@ -245,7 +254,7 @@ def main():
     man["infrastructure"] = {"created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                              "method": "HAND / FFPI at critical sites (point), bridges (both approaches, the lower), roads (every 30 m, "
                                        "min and length per HAND level); screening, not a flood depth",
-                             "files": ["critical_sites/critical_sites.parquet", "bridges/bridges.parquet", "roads/part-*.parquet",
+                             "files": ["critical_sites/critical_sites.parquet", "bridges/bridges.parquet", "roads/roads.parquet",
                                        "infra_hromadas/stats.parquet"]}
     if "population" in todo:
         man["population"] = {"method": "WorldPop pixel centres sampled on the national HAND rasters; people per hromada and per HAND "
