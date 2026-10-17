@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "geoproc/job_event.v1",
   "title": "platform.geoproc_event task kwargs",
-  "description": "Canonical: geoai-django contracts/geoproc/job_event.v1.json; vendored copy in flood_snap lab_service/contracts/. Sent by a geoprocessing worker to the platform queue after every state change. v1.1 (2026-10-13): result.kind (basin_delineation | hand_model), result.metadata / config_hash, products[].file_name / license; a done event always carries result.stats, result.basin only for a basin delineation.",
+  "description": "Canonical: geoai-django contracts/geoproc/job_event.v1.json; vendored copy in flood_snap lab_service/contracts/. Sent by a geoprocessing worker to the platform queue after every state change. v1.2 (2026-10-17): result.kind (basin_delineation | hand_model | gr4h_run), result.metadata / config_hash, products[].file_name / license; a done event always carries result.stats, result.basin only for a basin delineation.",
   "type": "object",
   "required": ["job_id", "payload"],
   "additionalProperties": false,
@@ -20,7 +20,7 @@
         "result": {
           "type": ["object", "null"],
           "properties": {
-            "kind": {"enum": ["basin_delineation", "hand_model"]},
+            "kind": {"enum": ["basin_delineation", "hand_model", "gr4h_run"]},
             "basin": {"type": "object"},
             "snapped_outlet": {"type": "object"},
             "stats": {"type": "object"},
@@ -64,7 +64,7 @@
               "result": {
                 "type": "object",
                 "required": ["stats"],
-                "if": {"properties": {"kind": {"const": "hand_model"}}, "required": ["kind"]},
+                "if": {"properties": {"kind": {"enum": ["hand_model", "gr4h_run"]}}, "required": ["kind"]},
                 "then": {"required": ["stats", "config_hash", "metadata"]},
                 "else": {"required": ["basin", "stats"]}
               }

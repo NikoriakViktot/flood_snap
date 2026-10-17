@@ -50,6 +50,15 @@ SRC_STAGE_MAX_M = float(os.environ.get("SRC_STAGE_MAX_M", "20"))
 SRC_MIN_CATCHMENT_KM2 = float(os.environ.get("SRC_MIN_CATCHMENT_KM2", "0.25"))
 SRC_MIN_LENGTH_M = float(os.environ.get("SRC_MIN_LENGTH_M", "500"))
 PNG_ZOOM = 12                                        # WebMercatorQuad zoom of the browser PNGs (future XYZ tiles align)
+
+# -- GR4H runs (lab_service/gr4h): CemaNeige-GR4H (airGR) on a delineated basin, hourly, as a short-lived Rscript child --
+GR4H_PIPELINE_VERSION = "lab.gr4h.v1"
+GR4H_MIN_WARMUP_DAYS = int(os.environ.get("GR4H_MIN_WARMUP_DAYS", "365"))      # initial states come from the warm-up, not the event
+GR4H_MAX_RUN_DAYS = int(os.environ.get("GR4H_MAX_RUN_DAYS", "31"))             # the event / forecast window
+GR4H_MAX_HOURS = int(os.environ.get("GR4H_MAX_HOURS", str(24 * 366 * 3)))     # forcing length
+GR4H_MAX_MEMBERS = int(os.environ.get("GR4H_MAX_MEMBERS", "1024"))             # parameter sets × hyetographs × depth factors
+GR4H_TIMEOUT_S = int(os.environ.get("GR4H_TIMEOUT_S", "900"))
+GR4H_FULL_SERIES_MAX_VALUES = int(os.environ.get("GR4H_FULL_SERIES_MAX_VALUES", "600000"))  # per-member series kept below this
 LAB_IMAGE_TAG = os.environ.get("LAB_IMAGE_TAG", "")  # provenance: the image this worker runs
 DEM_LABELS = {
     "copernicus_dem": {"label": "Copernicus GLO-30", "version": "Copernicus DEM GLO-30 (2019 release, AWS Open Data mirror)",
