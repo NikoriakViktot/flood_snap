@@ -50,6 +50,7 @@ SRC_STAGE_MAX_M = float(os.environ.get("SRC_STAGE_MAX_M", "20"))
 SRC_MIN_CATCHMENT_KM2 = float(os.environ.get("SRC_MIN_CATCHMENT_KM2", "0.25"))
 SRC_MIN_LENGTH_M = float(os.environ.get("SRC_MIN_LENGTH_M", "500"))
 PNG_ZOOM = 12                                        # WebMercatorQuad zoom of the browser PNGs (future XYZ tiles align)
+PNG_MIN_ZOOM = int(os.environ.get("PNG_MIN_ZOOM", "10"))  # large basins step down to this zoom before falling back to COGs only
 
 # -- GR4H runs (lab_service/gr4h): CemaNeige-GR4H (airGR) on a delineated basin, hourly, as a short-lived Rscript child --
 GR4H_PIPELINE_VERSION = "lab.gr4h.v1"

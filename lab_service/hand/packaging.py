@@ -163,11 +163,24 @@ def package(run: dict, out_dir: Path) -> dict:
     cog("stream_links", "stream_links", run["links"], 0, "int32")
     cog("catchments", "catchments", run["catchments"], 0, "int32")
 
-    grid = mercator_grid(run["bounds_3035"], crs)
-    npix = grid["width"] * grid["height"]
-    if npix > settings.HAND_PNG_MAX_PIXELS:
+    # the browser PNGs: zoom 12 (≈ 38 m at the equator, ≈ 25 m in Ukraine) when the basin fits the pixel budget, else a
+    # coarser zoom (11, then 10: a quarter of the pixels per step) so every basin the Lab builds can be looked at;
+    # the COGs keep the full 30 m resolution
+    grid = None
+    for zoom in range(settings.PNG_ZOOM, settings.PNG_MIN_ZOOM - 1, -1):
+        g = mercator_grid(run["bounds_3035"], crs, zoom)
+        if g["width"] * g["height"] <= settings.HAND_PNG_MAX_PIXELS:
+            grid = g
+            break
+    if grid is not None and grid["zoom"] < settings.PNG_ZOOM:
         run["stats"]["quality"]["warnings"].append(
-            f"basin too large for the in-browser PNG ({npix:,} px > {settings.HAND_PNG_MAX_PIXELS:,}): COGs only")
+            f"large basin: browser PNGs at zoom {grid['zoom']} ({grid['res_m']:.0f} m Mercator pixels) instead of {settings.PNG_ZOOM}; "
+            "the COGs keep 30 m")
+    if grid is None:
+        g = mercator_grid(run["bounds_3035"], crs, settings.PNG_MIN_ZOOM)
+        run["stats"]["quality"]["warnings"].append(
+            f"basin too large for the in-browser PNG even at zoom {settings.PNG_MIN_ZOOM} ({g['width'] * g['height']:,} px > "
+            f"{settings.HAND_PNG_MAX_PIXELS:,}): COGs only")
         run["stats"]["delivery"] = "cog_only"
     else:
         hand_m = to_mercator(run["hand"], tr, crs, grid, NODATA, "float32")
