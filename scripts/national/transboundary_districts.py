@@ -11,7 +11,8 @@ Method (90 m D8 of national_90m.py, EPSG:3035):
   WhiteboxTools Watershed(d8, entries) → every foreign cell labelled with the first Ukrainian cell its flow reaches
   A foreign catchment that touches the edge of the DEM mosaic is incomplete (Danube above the delta, cut at 21° E) and
   is dropped, as are cells that never reach Ukraine. Each district = its Ukrainian polygon ∪ its foreign catchments
-  (the Ukrainian parts are unchanged, districts still do not overlap).
+  (the Ukrainian parts are unchanged; the foreign parts are grown by CLOSE_M so they meet the border without a gap,
+  which can make neighbouring districts overlap by a few cells abroad — harmless for per-district terrain).
 
   docker run --rm -v ./data:/data -v ./scripts:/scripts projects-dem_worker \
     python3 /scripts/national/transboundary_districts.py [--dem copernicus_dem]
@@ -30,12 +31,17 @@ import numpy as np
 import rasterio
 from rasterio import features
 from scipy import ndimage
-from shapely.geometry import mapping, shape
+from shapely.geometry import MultiPolygon, Polygon, mapping, shape
 from shapely.ops import unary_union
 
 D8 = {1: (-1, 1), 2: (0, 1), 4: (1, 1), 8: (1, 0), 16: (1, -1), 32: (0, -1), 64: (-1, -1), 128: (-1, 0)}
 CRS = {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::3035"}}
 BUFFER_M = 3000.0
+# the foreign pieces are 90 m pixel outlines and the Ukrainian part is the vector border: between them a sliver of up to
+# one cell stays uncovered, and the 30 m terrain cut to the union had a nodata line along the border that stopped every
+# river there (Seim at 34.31° E: 19 709 km² upstream, 0 below). Close it by growing the foreign part by two cells.
+CLOSE_M = 180.0
+HOLE_MAX_M2 = 1e6
 
 
 def log(*a):
@@ -48,6 +54,14 @@ def shifted(a: np.ndarray, dr: int, dc: int) -> np.ndarray:
     h, w = a.shape
     out[max(dr, 0):h + min(dr, 0), max(dc, 0):w + min(dc, 0)] = a[max(-dr, 0):h - max(dr, 0), max(-dc, 0):w - max(dc, 0)]
     return out
+
+
+def without_small_holes(g, max_m2: float = HOLE_MAX_M2):
+    """Drop interior rings below max_m2: slivers where the grown foreign pieces meet the Ukrainian polygon. Cut to the
+    district, each became a nodata hole in d8/dem (up to 134 cells, Crimea) that stopped the flow lines running into it."""
+    polys = list(getattr(g, "geoms", [g]))
+    out = [Polygon(p.exterior, [r for r in p.interiors if Polygon(r).area >= max_m2]) for p in polys]
+    return out[0] if len(out) == 1 else MultiPolygon(out)
 
 
 def fc(name: str, code: str, geom) -> dict:
@@ -128,9 +142,9 @@ def main():
         pieces = [shape(g) for g, v in features.shapes(lab, mask=lab == k, transform=transform) if v == k]
         pieces = [g for g in pieces if g.area / 1e6 >= a.min_km2]
         others = unary_union([g for s, g in geoms.items() if s != d["slug"]])
-        abroad = unary_union(pieces).difference(others) if pieces else None
+        abroad = unary_union(pieces).buffer(CLOSE_M).difference(others) if pieces else None
         g = geoms[d["slug"]] if abroad is None or abroad.is_empty else unary_union([geoms[d["slug"]], abroad.buffer(0)])
-        g = g.buffer(0)
+        g = without_small_holes(g.buffer(0))
         foreign_km2 = 0.0 if abroad is None else abroad.area / 1e6
         (out / f"{d['slug']}.geojson").write_text(json.dumps(fc(d["slug"], d["code"], g)))
         (out / f"{d['slug']}_buf.geojson").write_text(json.dumps(fc(f"{d['slug']}_buf", d["code"], g.buffer(BUFFER_M).simplify(30))))

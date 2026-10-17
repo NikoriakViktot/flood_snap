@@ -50,11 +50,17 @@ def district(a, d: dict, cuts: Path, out: Path) -> dict:
     if s2 != shape or any(abs(x - y) > 1e-6 for x, y in zip(b2, bounds)):
         tmp.unlink(missing_ok=True)
         raise SystemExit(f"{d['slug']}: dem_f32 grid {s2} {tuple(b2)} differs from d8 {shape} {tuple(bounds)}")
+    # the same interior-void fill as national_hand.py --fill-voids: a GLO-30 void is a sink for the Lab's HAND breach
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from national_hand import fill_voids
+    filled = fill_voids(tmp) if a.fill_voids else 0
     tmp.replace(dst)
     run_path = out / "run.json"
     run = json.loads(run_path.read_text()) if run_path.exists() else {}
     run.setdefault("files", {})["dem_f32.tif"] = {k: ENCODING[k] for k in ("dtype", "units", "nodata")}
     run["dem_f32_created_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    run["dem_f32_filled_voids_cells"] = filled
     run_path.write_text(json.dumps(run, ensure_ascii=False, indent=1))
     return {"seconds": round(time.time() - t0, 1), "bytes": dst.stat().st_size, "shape": shape}
 
@@ -68,6 +74,7 @@ def main():
     ap.add_argument("--suffix", default="", help="output hand_<threshold><suffix> (e.g. _tb for the transboundary districts)")
     ap.add_argument("--only", default="", help="comma list of district slugs (e.g. 5_3_2)")
     ap.add_argument("--force", action="store_true", help="rebuild an existing dem_f32.tif")
+    ap.add_argument("--fill-voids", action="store_true", help="fill interior nodata (GLO-30 voids) as national_hand.py does")
     a = ap.parse_args()
     cuts = Path(a.root) / a.cuts
     only = {c.strip() for c in a.only.split(",") if c.strip()}
