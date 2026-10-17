@@ -185,12 +185,22 @@ def test_products_budget_drops_in_order(run, tmp_path, monkeypatch):
     assert any("size budget" in w for w in run["stats"]["quality"]["warnings"])
 
 
+def test_large_basin_steps_the_png_down_a_zoom(run, tmp_path, monkeypatch):
+    from lab_service.hand import packaging as PK
+    z12 = PK.mercator_grid(run["bounds_3035"], run["crs"], 12)
+    monkeypatch.setattr(settings, "HAND_PNG_MAX_PIXELS", z12["width"] * z12["height"] - 1)   # z12 just too big
+    files = PK.package(run, tmp_path / "out")
+    assert run["stats"]["delivery"] == "png" and files["hand_png"]["stats"]["grid"]["zoom"] == 11
+    assert files["hand_aux_png"]["stats"]["grid"]["zoom"] == 11
+    assert any("zoom 11" in w for w in run["stats"]["quality"]["warnings"])
+
+
 def test_png_budget_gives_cogs_only(run, tmp_path, monkeypatch):
     from lab_service.hand import packaging as PK
     monkeypatch.setattr(settings, "HAND_PNG_MAX_PIXELS", 10)
     files = PK.package(run, tmp_path / "out")
     assert "hand_png" not in files and run["stats"]["delivery"] == "cog_only"
-    assert any("COGs only" in w for w in run["stats"]["quality"]["warnings"])
+    assert any("COGs only" in w and "zoom 10" in w for w in run["stats"]["quality"]["warnings"])
 
 
 def test_rating_curves_per_reach(run):
