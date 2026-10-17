@@ -47,6 +47,28 @@ def _clip(a, d: dict, cuts: Path, out: Path, items) -> None:
         tmp.replace(out / name)
 
 
+def fill_voids(dem: Path, max_cells: int = 100) -> int:
+    """Fill interior nodata (voids of the source DEM, not connected to the outside of the cut) by GDAL inverse-distance
+    interpolation from the void's rim; the outside stays nodata. A void is a sink for D8, so it cut local flow lines
+    (GLO-30: up to 134 cells in Crimea). Returns the number of filled cells."""
+    import numpy as np  # noqa: F401
+    import rasterio
+    from rasterio.fill import fillnodata
+    from scipy import ndimage
+    with rasterio.open(dem, "r+") as ds:
+        z = ds.read(1)
+        valid = z != ds.nodata
+        holes = ndimage.binary_fill_holes(valid) & ~valid
+        n = int(holes.sum())
+        if n:
+            # GDAL takes mask==0 as "to fill" and never as a source: fill a copy everywhere, keep only the voids
+            filled = fillnodata(z.copy(), mask=valid.astype("uint8"), max_search_distance=max_cells, smoothing_iterations=0)
+            z[holes] = filled[holes]
+            n -= int((holes & (z == ds.nodata)).sum())
+            ds.write(z, 1)
+    return n
+
+
 def district(a, d: dict, cuts: Path, work: Path, out: Path) -> dict:
     t0 = time.time()
     work.mkdir(parents=True, exist_ok=True)
@@ -55,6 +77,7 @@ def district(a, d: dict, cuts: Path, work: Path, out: Path) -> dict:
     sh("gdalwarp", "-q", "-overwrite", "-t_srs", EPSG, "-tr", str(RES), str(RES), "-r", "bilinear", "-tap",
        "-cutline", str(cuts / f"{d['slug']}_buf.geojson"), "-crop_to_cutline", "-srcnodata", "-9999", "-dstnodata", "-9999",
        "-ot", "Float32", "-multi", "-wo", "NUM_THREADS=8", "-wm", "2048", *CO, VRT[a.dem], str(dem))
+    filled = fill_voids(dem) if a.fill_voids else 0
     import whitebox
     w = whitebox.WhiteboxTools()
     w.set_verbose_mode(False)
@@ -79,7 +102,7 @@ def district(a, d: dict, cuts: Path, work: Path, out: Path) -> dict:
     prev = json.loads((out / "run.json").read_text()) if terrain_only and (out / "run.json").exists() else {}
     run = {**prev, "district": d["code"], "name_ua": d["name_ua"], "km2": d["km2"], "km2_abroad": d.get("km2_abroad", 0), "dem": a.dem, "threshold_cells": a.threshold,
            "crs": EPSG, "res_m": RES, "buffer_m": 3000, "seconds": round(time.time() - t0, 1),
-           "steps_s": {**prev.get("steps_s", {}), **times}, "terrain_version": "v2" if a.cuts != "_districts" else "v1", "cuts": a.cuts,
+           "steps_s": {**prev.get("steps_s", {}), **times}, "filled_voids_cells": filled, "terrain_version": "v2" if a.cuts != "_districts" else "v1", "cuts": a.cuts,
            "files": {"hand.tif": {"dtype": "float32", "units": "m", "nodata": -9999}, "streams.tif": {"dtype": "uint8", "nodata": 0},
                      "d8.tif": {"dtype": "uint8", "encoding": "wbt_d8_pointer", "nodata": 0},
                      "dem.tif": {"dtype": "int16", "units": "m", "nodata": -32768}},
@@ -97,6 +120,7 @@ def main():
     ap.add_argument("--cuts", default="_districts", help="district cut lines under --root (_districts_tb: with the foreign catchments)")
     ap.add_argument("--no-hand", action="store_true", help="terrain only (d8, streams, dem): HAND is built per basin in the Flood Lab, not nationally")
     ap.add_argument("--suffix", default="", help="output hand_<threshold><suffix> (e.g. _tb for the transboundary districts)")
+    ap.add_argument("--fill-voids", action="store_true", help="fill interior nodata of the warped DEM (GLO-30 voids) before breaching")
     ap.add_argument("--only", default="", help="comma list of district slugs (e.g. 5_3_3,M5_2)")
     ap.add_argument("--terrain-only", action="store_true", help="add d8.tif / dem.tif to districts that already have hand.tif")
     a = ap.parse_args()
