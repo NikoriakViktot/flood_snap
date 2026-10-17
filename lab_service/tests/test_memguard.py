@@ -51,7 +51,7 @@ def test_gate_waits_then_fails_with_a_plain_message(monkeypatch, sent):
     assert sent == []
     assert tasks.memory_gate(_Task(settings.MEM_RETRIES), "j1") is False
     body = sent[-1]["payload"]
-    assert body["status"] == "failed" and body["stage"] == "server_busy" and "short of memory" in body["error"]
+    assert body["status"] == "failed" and body["stage"] == "server_busy" and "server stayed busy" in body["error"]
 
 
 def test_gate_lets_jobs_run_when_memory_is_free(monkeypatch, sent):

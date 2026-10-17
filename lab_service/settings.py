@@ -62,7 +62,7 @@ GR4J_MAX_DAYS = int(os.environ.get("GR4J_MAX_DAYS", str(366 * 30)))           # 
 # memory guard (all Lab tasks): the host's MemAvailable before a job starts; below it the job waits and is retried
 MIN_FREE_MEM_MB = int(os.environ.get("MIN_FREE_MEM_MB", "1536"))
 MEM_RETRY_S = int(os.environ.get("MEM_RETRY_S", "300"))
-MEM_RETRIES = int(os.environ.get("MEM_RETRIES", "12"))                        # 12 × 5 min = 1 h, then failed
+MEM_RETRIES = int(os.environ.get("MEM_RETRIES", "4"))                         # 4 × 5 min = 20 min queued, then failed
 GR4H_MIN_WARMUP_DAYS = int(os.environ.get("GR4H_MIN_WARMUP_DAYS", "365"))      # initial states come from the warm-up, not the event
 GR4H_MAX_RUN_DAYS = int(os.environ.get("GR4H_MAX_RUN_DAYS", "31"))             # the event / forecast window
 GR4H_MAX_HOURS = int(os.environ.get("GR4H_MAX_HOURS", str(24 * 366 * 3)))     # forcing length
