@@ -40,7 +40,7 @@ sequenceDiagram
   participant A as geoproc (API)
   participant R as Redis list lab_jobs
   participant W as geoproc-worker
-  participant S as S3 national_terrain/v1
+  participant S as S3 national_terrain/v2
   D->>A: POST /internal/jobs/basin-delineation (Bearer service JWT)
   A->>A: validate DEM, region, outlet; write JOBS_ROOT/<job_id>.json
   A->>R: LPUSH job_id
@@ -162,7 +162,7 @@ stops the retries; failures are logged only. The platform is expected to re-poll
 | `PLATFORM_REDIS_URL` | `redis://platform-redis:6379/2` | `platform-redis` must be reachable on the `web` network |
 | `LAB_QUEUE_KEY` | `lab_jobs` | |
 | `S3_BUCKET` | hard-coded bucket | `AWS_DEFAULT_REGION` is read by boto3; credentials from the instance role |
-| `TERRAIN_PREFIX` | `hydro/lake/national_terrain/v1` | |
+| `TERRAIN_PREFIX` | `hydro/lake/national_terrain/v2` | v2 = districts + their foreign catchments (2026-10-18); the cache path has no version: move `CACHE_ROOT` aside when it changes |
 | `TERRAIN_LOCAL` | "" | local terrain tree instead of S3 |
 | `CACHE_ROOT` / `CACHE_MAX_GB` | `/data/lab/cache` / 8 | |
 | `JOBS_ROOT` / `JOB_TTL_DAYS` | `/data/lab/jobs` / 30 | |

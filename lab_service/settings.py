@@ -16,7 +16,7 @@ CELERY_QUEUE = os.environ.get("LAB_CELERY_QUEUE", "geoproc")
 PLATFORM_QUEUE = os.environ.get("PLATFORM_CELERY_QUEUE", "celery")
 
 S3_BUCKET = os.environ.get("S3_BUCKET", "geo-hydro-ai-data-116344514823-us-east-1-an")
-TERRAIN_PREFIX = os.environ.get("TERRAIN_PREFIX", "hydro/lake/national_terrain/v1").strip("/")
+TERRAIN_PREFIX = os.environ.get("TERRAIN_PREFIX", "hydro/lake/national_terrain/v2").strip("/")
 # TERRAIN_LOCAL: a local copy of the staged tree (tests, the workstation); when set, S3 is never touched
 TERRAIN_LOCAL = os.environ.get("TERRAIN_LOCAL", "")
 CACHE_ROOT = Path(os.environ.get("CACHE_ROOT", "/data/lab/cache"))
