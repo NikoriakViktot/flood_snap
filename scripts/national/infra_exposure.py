@@ -7,6 +7,7 @@ Per feature (OSM 2026-10-12, deploy/server/risk_layers in data_dnipro_h_q, ODbL)
   bridges         (lines)   the same at both approaches (line ends); `*_min` = the lower approach — the deck itself spans
                             the river, so HAND under it says nothing
   roads           (lines)   sampled every SAMPLE_M (EPSG:3035 metres): hand_min_fab_dm / hand_min_cop_dm along the segment,
+                            ffpi_x10_max (highest FFPI × 10, 0 = none), len_m_ffpi_ge_7 / len_m_ffpi_ge_8_5,
                             len_m, and len_m_hand_le_{1,2,3,5,10}m (FABDEM) = the segment's length whose ground lies within
                             L metres above the nearest stream
   pcode           hromada (COD-AB v05 ADM3) of the point / the line's midpoint
@@ -121,7 +122,8 @@ def do_roads(adm3) -> pd.DataFrame:
     n_total = pyogrio.read_info(OSM, layer="risk_roads")["features"]
     out = LAKE / "roads"
     out.mkdir(parents=True, exist_ok=True)
-    samplers = {k: Sampler(*RASTERS[k]) for k in ("hand_fab_dm", "hand_cop_dm")}   # ~9 GB: both HAND rasters stay loaded
+    # ~13.5 GB: both HAND rasters and the FFPI mosaic stay loaded
+    samplers = {k: Sampler(*RASTERS[k]) for k in ("hand_fab_dm", "hand_cop_dm", "ffpi_x10")}
     log("road rasters loaded")
     stats = []
     for part, off in enumerate(range(0, n_total, ROAD_CHUNK)):
@@ -137,6 +139,15 @@ def do_roads(adm3) -> pd.DataFrame:
         x, y = T3035_3857.transform(shapely.get_x(pts), shapely.get_y(pts))
         x, y = np.asarray(x), np.asarray(y)
         for k, s in samplers.items():
+            if k == "ffpi_x10":
+                # FFPI × 10 along the segment (0 = no data): its highest sample, and the length in the high (≥ 7) and very
+                # high (≥ 8.5) classes — what the map colours a road by (frontend Flooding group, "roads by FFPI")
+                f = s(x, y).astype(np.int16)
+                g["ffpi_x10_max"] = np.maximum.reduceat(f, starts).astype(np.uint8)
+                for thr, name in ((70, "len_m_ffpi_ge_7"), (85, "len_m_ffpi_ge_8_5")):
+                    share = np.add.reduceat((f >= thr).astype(np.float64), starts) / n
+                    g[name] = (share * L).astype(np.float32)
+                continue
             v = s(x, y).astype(np.int16)
             v[v == 255] = 999
             mn = np.minimum.reduceat(v, starts)
@@ -232,7 +243,9 @@ def main():
         parts["roads"] = pd.concat([r.groupby("pcode")["len_m"].sum().div(1000).rename("road_km"),
                                     main_roads.groupby("pcode")["len_m"].sum().div(1000).rename("road_km_main")] +
                                    [r.groupby("pcode")[f"len_m_hand_le_{lv}m"].sum().div(1000).rename(f"road_km_hand_le_{lv}m") for lv in LEVELS] +
-                                   [main_roads.groupby("pcode")[f"len_m_hand_le_{lv}m"].sum().div(1000).rename(f"road_km_main_hand_le_{lv}m") for lv in (2, 5)], axis=1)
+                                   [main_roads.groupby("pcode")[f"len_m_hand_le_{lv}m"].sum().div(1000).rename(f"road_km_main_hand_le_{lv}m") for lv in (2, 5)] +
+                                   [r.groupby("pcode")["len_m_ffpi_ge_7"].sum().div(1000).rename("road_km_ffpi_ge_7"),
+                                    main_roads.groupby("pcode")["len_m_ffpi_ge_7"].sum().div(1000).rename("road_km_main_ffpi_ge_7")], axis=1)
     if "population" in todo:
         parts["population"] = do_population(adm3).set_index("pcode")
     stats_path = LAKE / "infra_hromadas" / "stats.parquet"
