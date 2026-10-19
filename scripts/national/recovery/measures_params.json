@@ -1,0 +1,104 @@
+{
+  "_note": "Sensitivity rates for the measures, NOT Ukrainian cost estimates (owner's review, 2026-10-19). Every rate carries its source and price year; the page shows cost ranges labelled as sensitivity. Replace with a priced bill of quantities when one exists.",
+  "embankment": {
+    "crest_width_m": 3.0,
+    "slope_h_per_v": 3.0,
+    "unit_cost_eur_m3": {
+      "low": 35,
+      "mid": 60,
+      "high": 95
+    },
+    "unit_cost_source": "Environment Agency, Cost estimation for fluvial defences (SC080039/R2, 2015): earth embankments £33 (>15 000 m³), £64 (5 000–15 000 m³), £94 (500–5 000 m³) per m³ of fill, UK prices; mid = the reviewer's illustrative 60 €/m³. Excludes revetment, seepage control, drainage, design and maintenance.",
+    "unit_cost_price_year": 2015,
+    "min_structural_height_m": 0.5
+  },
+  "wall": {
+    "unit_cost_eur_m": 4200,
+    "unit_cost_source": "Environment Agency SC080039/R2 (2015): flood walls 2.1–5.3 m high, £3 577 per linear metre, UK prices; converted at ~1.17 €/£.",
+    "unit_cost_price_year": 2015
+  },
+  "benchmark_ua": {
+    "cost_uah_per_km": 12480000,
+    "source": "Ivano-Frankivsk oblast flood-protection programme 2021–2025: 598.9 M UAH for 48 km of dike construction, reconstruction and restoration ≈ 12.48 M UAH/km (planned 2021 figures, mixed works, not new construction at 2026 prices) — owner's review 2026-10-19, to verify against the programme document.",
+    "price_year": 2021
+  },
+  "ead": {
+    "aep_max_central": 0.5,
+    "aep_max_sensitivity": 0.33,
+    "return_periods_years": [
+      2,
+      5,
+      10,
+      20,
+      50,
+      100,
+      200,
+      500
+    ],
+    "onset": "the gauge's flood-plain level (flood_plain_cm − low water) where the yearbook gives one; below it the river stays in its channel and the levels do no damage",
+    "curve": "through the study's central 10 % / 1 % / 0.2 % rises, linear in the Gumbel reduced variate between them; below T = 10 extrapolated with the Gumbel slope of the study's Gumbel fit"
+  },
+  "cost_price": {
+    "note": "costs are brought to € of the Eurostat construction-cost price year (the same year as the eur_eurostat damage layer) with the Eurostat EU-27 index, so avoided EAD and cost are compared in one year and currency",
+    "om_share_per_year": 0.01,
+    "om_note": "operation and maintenance of embankments as a share of capital cost per year — an assumption for the lifecycle view, not a Ukrainian norm"
+  },
+  "study": {
+    "note": "budget model for a detailed hydrodynamic study of one river reach (owner's review 2026-10-19): expert planning assumptions, 2026 prices, no VAT, not quotations; scaled by the modelled reach length (one reach may serve several hromadas)",
+    "reference_reach_km": 20,
+    "person_days_by_stage": {
+      "hydrology_hydrographs": 15,
+      "dem_channel_gis": 25,
+      "hecras_2d_scenarios": 45,
+      "calibration_validation": 20,
+      "fiat_ead_measures": 20,
+      "qa_report_handover": 15
+    },
+    "day_rate_eur": 350,
+    "survey_eur_per_reference_reach": 35000,
+    "survey_note": "topography, bathymetry and field work for the reference reach; mountain reaches with bridges and narrow flood plains may exceed it",
+    "contingency_share": 0.15,
+    "ranges_eur": {
+      "screening_no_hydrodynamics": [
+        2000,
+        10000
+      ],
+      "hecras_1d_10_25km_good_data": [
+        15000,
+        45000
+      ],
+      "hecras_2d_10_25km_good_data": [
+        30000,
+        90000
+      ],
+      "detailed_with_field_validation_measures": [
+        70000,
+        180000
+      ]
+    },
+    "benchmarks": [
+      {
+        "project": "UNDP Tobago 2025 — geospatial flood-risk assessment and maps",
+        "budget": "USD 30 308"
+      },
+      {
+        "project": "UNDP Moldova 2025 — data collection for risk modelling and mapping",
+        "budget": "USD 70 399"
+      },
+      {
+        "project": "The Hills Shire (Australia) 2026 — hydraulic model adaptation, detailed maps",
+        "budget": "AUD 168 500"
+      },
+      {
+        "project": "Puyallup River (USA) 2025 — HEC-RAS and FEMA mapping of 22.5 km",
+        "budget": "USD 500 000"
+      }
+    ]
+  },
+  "confidence_levels": {
+    "1": "HAND / DEM / statistical levels — preliminary screening",
+    "2": "HEC-RAS 1D/2D without validation — preliminary hydraulic assessment",
+    "3": "HEC-RAS 1D/2D with validation — detailed risk assessment",
+    "4": "validated model + uncertainty analysis + economic appraisal — basis for comparing protection options (still not engineering design)"
+  }
+}
