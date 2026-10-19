@@ -20,11 +20,16 @@ import pandas as pd
 
 from recovery_fiat import VALIDATION_NOTE
 
+# the confidence level of a run (owner's review 2026-10-19): 1 screening, 2 hydraulic model unvalidated, 3 validated;
+# 4 (validated + uncertainty + economics) is set by hand when such a study exists
+CONFIDENCE = {("hand_screening", "not_validated"): 1, ("gr4j", "not_validated"): 1, ("hecras", "not_validated"): 2, ("hecras", "validated"): 3}
+
 HERE = Path(__file__).resolve().parent
-EAD_COLS = ["run", "pcode", "name", "post_id", "gauge_name", "gauge_how", "gauge_dist_km", "rise_10pct_m", "rise_1pct_m", "rise_02pct_m",
-            "aep_by_level", "ead_eur2010", "ead_eur_eurostat", "ead_uah_sssu"]
-MEASURE_COLS = ["run", "pcode", "measure", "design", "design_aep", "height_m", "protects_levels_le_m", "buildings_protected", "length_km",
-                "unit_cost_eur_per_km_m", "cost_eur", "avoided_ead_eur2010", "residual_ead_eur2010", "avoided_ead_eur_eurostat", "avoided_ead_uah_sssu"]
+EAD_COLS = ["run", "pcode", "name", "post_id", "gauge_name", "gauge_how", "gauge_dist_km", "same_basin", "onset_m", "rise_10pct_m", "rise_1pct_m",
+            "rise_02pct_m", "rises_T", "aep_by_level", "ead_eur2010", "ead_low_eur2010", "ead_high_eur2010", "ead_eur_eurostat", "ead_uah_sssu"]
+MEASURE_COLS = ["run", "pcode", "measure", "design", "design_aep", "height_m", "bank_m", "height_struct_m", "protects_levels_le_m", "buildings_protected",
+                "length_km", "volume_m3", "cost_low_eur", "cost_mid_eur", "cost_high_eur", "cost_wall_eur", "cost_benchmark_uah",
+                "avoided_ead_eur2010", "residual_ead_eur2010", "avoided_ead_eur_eurostat", "avoided_ead_uah_sssu"]
 LAKE = Path.home() / "projects/data/s3_staging/hydro/lake"
 
 
@@ -75,7 +80,8 @@ def main():
                    "scenario_kind": summ.get("scenario_kind", "hand_level_m"), "hazard_kind": summ.get("hazard_kind", "hand_screening"),
                    "hazard_label": summ.get("hazard_label", "HAND screening"), "validation": summ.get("validation", "not_validated"),
                    "validation_note": summ.get("validation_note") or VALIDATION_NOTE.get(summ.get("hazard_kind", "hand_screening"), ""),
-                   "ead_method": ead_meta.get("method")}]).to_csv(out / "runs.csv", index=False)
+                   "ead_method": ead_meta.get("method"),
+                   "confidence_level": CONFIDENCE.get((summ.get("hazard_kind", "hand_screening"), summ.get("validation", "not_validated")), 1)}]).to_csv(out / "runs.csv", index=False)
     # the EAD and measures tables are always there (empty with headers when recovery_ead.py has not run), so one SQL loads a run
     for name, cols in (("hromada_ead.csv", EAD_COLS), ("measures.csv", MEASURE_COLS)):
         if not (out / name).exists():
