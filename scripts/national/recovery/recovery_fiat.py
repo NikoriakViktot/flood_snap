@@ -18,6 +18,13 @@ Outputs: data/s3_staging/hydro/lake/impact/v1/fiat/<region>_a<A>/
   summary.json (per level and per hromada: buildings damaged, € structure / content / total)
 
   ~/repo/data_dnipro_h_q/.venv-linux/bin/python scripts/national/recovery/recovery_fiat.py [--region UA26] [--a-min 50]
+
+Hydraulic depths instead of the screening (owner, 2026-10-19: «замінити скринінгову глибину на гідравлічну там, де є
+HEC-RAS або GR4J»): --hazard-tif T=<depth.tif> per return period T (years), e.g. the max-depth rasters of an imported
+HEC-RAS run (Django apps/hecras, Terracotta <tc_category>/depth_max) or a GR4J → HAND depth product. The scenario key is
+then the return period, `scenario_kind = return_period_years`; --hazard-kind hecras|gr4j and --validation
+validated|not_validated are written to the run so the page can say what the numbers rest on. Nothing is validated
+until a hydraulic model has been checked against observed floods; the HAND screening never is.
 """
 from __future__ import annotations
 
@@ -85,13 +92,58 @@ def depth_grids(region_3035, a_min: float, out: Path) -> dict[int, Path]:
     return paths
 
 
+def external_depth_grids(region_3035, tifs: dict[int, Path], out: Path) -> dict[int, Path]:
+    """hydraulic depth rasters (any CRS / resolution) resampled onto the region's 30 m EPSG:3035 grid; ≤ 0 = dry"""
+    minx, miny, maxx, maxy = region_3035.bounds
+    res = 30.0
+    w, h = int(np.ceil((maxx - minx) / res)), int(np.ceil((maxy - miny) / res))
+    tf = from_origin(minx, maxy, res, res)
+    prof = {"driver": "GTiff", "dtype": "float32", "width": w, "height": h, "count": 1, "crs": "EPSG:3035", "transform": tf,
+            "nodata": -9999.0, "compress": "deflate", "tiled": True, "blockxsize": 512, "blockysize": 512}
+    paths = {}
+    for key, src in tifs.items():
+        d = np.full((h, w), -9999.0, np.float32)
+        with rasterio.open(src) as r:
+            reproject(rasterio.band(r, 1), d, dst_transform=tf, dst_crs="EPSG:3035", resampling=Resampling.bilinear, dst_nodata=-9999.0)
+        d = np.where(np.isfinite(d) & (d > 0), d, -9999.0).astype(np.float32)
+        p = out / f"depth_L{key}.tif"
+        with rasterio.open(p, "w", **prof) as o:
+            o.write(d, 1)
+        paths[key] = p
+        log(f"depth T={key} y from {src.name}: {(d > 0).sum() * 900 / 1e6:.1f} km² under water")
+    return paths
+
+
+VALIDATION_NOTE = {
+    "hand_screening": "Не змодельовано гідравлічно: глибина = рівень − висота над руслом (HAND). Оціночні дані, не валідовані за "
+                      "спостереженими паводками. Точні глибини дає лише гідравлічна модель (HEC-RAS); для регіону її ще немає.",
+    "hecras": "Глибини з гідравлічної моделі HEC-RAS. Валідованими є лише прогони, перевірені за спостереженими паводками "
+              "(статус прогону в платформі).",
+    "gr4j": "Глибини з ланцюга GR4J → крива HAND: гідрологічна модель, без гідравліки русла. Оціночні дані, не валідовані.",
+}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--region", default="UA26")
     ap.add_argument("--a-min", type=float, default=50.0)
+    ap.add_argument("--hazard-tif", action="append", default=[], metavar="T=PATH",
+                    help="hydraulic depth raster of the T-year flood instead of the HAND screening (repeatable)")
+    ap.add_argument("--hazard-kind", choices=list(VALIDATION_NOTE), default=None, help="hand_screening (default) | hecras | gr4j")
+    ap.add_argument("--hazard-label", default="", help="e.g. 'HEC-RAS M5.3-R013 Яблуниця — гирло, прогін 2027-03'")
+    ap.add_argument("--validation", choices=["not_validated", "validated"], default="not_validated")
+    ap.add_argument("--tag", default="", help="run name suffix for an external hazard (default: the hazard kind)")
     a = ap.parse_args()
     t0 = time.time()
-    out = LAKE / "impact/v1/fiat" / f"{a.region}_a{a.a_min:g}"
+    tifs = {int(k): Path(v) for k, v in (x.split("=", 1) for x in a.hazard_tif)}
+    hazard_kind = a.hazard_kind or ("hecras" if tifs else "hand_screening")
+    if tifs and hazard_kind == "hand_screening":
+        raise SystemExit("--hazard-tif needs --hazard-kind hecras or gr4j")
+    if not tifs and a.validation == "validated":
+        raise SystemExit("the HAND screening is never validated")
+    scenario_kind = "return_period_years" if tifs else "hand_level_m"
+    keys = sorted(tifs) if tifs else list(LEVELS)
+    out = LAKE / "impact/v1/fiat" / (f"{a.region}_{a.tag or hazard_kind}" if tifs else f"{a.region}_a{a.a_min:g}")
     out.mkdir(parents=True, exist_ok=True)
     adm3 = gpd.read_parquet(ADM3)
     reg = adm3[adm3["pcode"].str.startswith(a.region)]
@@ -129,9 +181,9 @@ def main():
                   "fn_damage_content": b["cls"], "max_damage_content": b["max_damage_content"]}).to_csv(expo / "buildings.csv", index=False)
     log(f"exposure: {len(b):,} buildings ({b.cls.value_counts().to_dict()}), "
         f"max damage {(b.max_damage_structure.sum() + b.max_damage_content.sum()) / 1e6:,.0f} M€ (2010)")
-    hz = depth_grids(region, a.a_min, out)
+    hz = external_depth_grids(region, tifs, out) if tifs else depth_grids(region, a.a_min, out)
     res = b[["object_id", "osm_id", "cls", "pcode"]].copy()
-    for lv in LEVELS:
+    for lv in keys:
         run = out / f"L{lv}"
         run.mkdir(exist_ok=True)
         (run / "settings.toml").write_text(f'''[global]
@@ -174,13 +226,16 @@ step_size = 0.01
         res[f"damage_L{lv}"] = res["object_id"].map(o[dcol[0]] if dcol else o[scol[0]] + o[ccol[0]]).fillna(0)
         if wcol:
             res[f"depth_L{lv}"] = res["object_id"].map(o[wcol[0]])
-        log(f"FIAT L={lv} m: {time.time() - t:.0f} s, damaged {(res[f'damage_L{lv}'] > 0).sum():,} buildings, "
+        log(f"FIAT {'T' if tifs else 'L'}={lv}: {time.time() - t:.0f} s, damaged {(res[f'damage_L{lv}'] > 0).sum():,} buildings, "
             f"{res[f'damage_L{lv}'].sum() / 1e6:,.1f} M€ (2010)  [columns {list(o.columns)[:12]}]")
     res.to_parquet(out / "damage.parquet", index=False)
     names = adm3.set_index("pcode")["name_ua"]
-    summ = {"region": a.region, "a_min_km2": a.a_min, "price_level": "EUR 2010 (JRC)", "ground_floor_m": GROUND_FLOOR_M,
-            "buildings": int(len(b)), "classes": b.cls.value_counts().to_dict(), "levels": {}}
-    for lv in LEVELS:
+    summ = {"region": a.region, "a_min_km2": None if tifs else a.a_min, "price_level": "EUR 2010 (JRC)", "ground_floor_m": GROUND_FLOOR_M,
+            "buildings": int(len(b)), "classes": b.cls.value_counts().to_dict(), "scenario_kind": scenario_kind, "scenario_keys": keys,
+            "hazard_kind": hazard_kind, "hazard_label": a.hazard_label or ("HAND screening" if not tifs else hazard_kind),
+            "hazard_files": {str(k): str(v) for k, v in tifs.items()}, "validation": a.validation,
+            "validation_note": VALIDATION_NOTE[hazard_kind], "levels": {}}
+    for lv in keys:
         dmg = res[f"damage_L{lv}"]
         per = res[dmg > 0].groupby("pcode")[f"damage_L{lv}"].agg(["count", "sum"]).sort_values("sum", ascending=False)
         summ["levels"][str(lv)] = {"damaged": int((dmg > 0).sum()), "damage_eur": round(float(dmg.sum())),

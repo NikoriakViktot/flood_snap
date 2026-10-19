@@ -18,7 +18,13 @@ import duckdb
 import geopandas as gpd
 import pandas as pd
 
+from recovery_fiat import VALIDATION_NOTE
+
 HERE = Path(__file__).resolve().parent
+EAD_COLS = ["run", "pcode", "name", "post_id", "gauge_name", "gauge_how", "gauge_dist_km", "rise_10pct_m", "rise_1pct_m", "rise_02pct_m",
+            "aep_by_level", "ead_eur2010", "ead_eur_eurostat", "ead_uah_sssu"]
+MEASURE_COLS = ["run", "pcode", "measure", "design", "design_aep", "height_m", "protects_levels_le_m", "buildings_protected", "length_km",
+                "unit_cost_eur_per_km_m", "cost_eur", "avoided_ead_eur2010", "residual_ead_eur2010", "avoided_ead_eur_eurostat", "avoided_ead_uah_sssu"]
 LAKE = Path.home() / "projects/data/s3_staging/hydro/lake"
 
 
@@ -32,6 +38,7 @@ def main():
     summ = json.loads((run_dir / "summary.json").read_text())
     dmg = pd.read_parquet(run_dir / "damage.parquet")
     levels = sorted(int(c.split("_L")[1]) for c in dmg.columns if c.startswith("damage_L"))
+    ead_meta = json.loads((run_dir / "summary_ead.json").read_text()) if (run_dir / "summary_ead.json").exists() else {}
     # centroids of the damaged buildings
     ids = set(dmg.loc[dmg[[f"damage_L{lv}" for lv in levels]].gt(0).any(axis=1), "osm_id"])
     con = duckdb.connect(); con.sql("INSTALL spatial; LOAD spatial;")
@@ -64,7 +71,15 @@ def main():
                    "hazard": "water depth = L − HAND (FABDEM 30 m) above rivers ≥ A_MIN km²; screening, not hydraulics",
                    "exposure": "OSM buildings (exposure/v1/buildings): RES / COM / IND by tag, footprint",
                    "model": "Delft-FIAT 0.2.1, JRC European damage functions, JRC Ukraine max damage (Huizinga et al. 2017)",
-                   "price_eurostat_year": yr["eur_eurostat"], "price_sssu_year": yr["uah_sssu"]}]).to_csv(out / "runs.csv", index=False)
+                   "price_eurostat_year": yr["eur_eurostat"], "price_sssu_year": yr["uah_sssu"],
+                   "scenario_kind": summ.get("scenario_kind", "hand_level_m"), "hazard_kind": summ.get("hazard_kind", "hand_screening"),
+                   "hazard_label": summ.get("hazard_label", "HAND screening"), "validation": summ.get("validation", "not_validated"),
+                   "validation_note": summ.get("validation_note") or VALIDATION_NOTE.get(summ.get("hazard_kind", "hand_screening"), ""),
+                   "ead_method": ead_meta.get("method")}]).to_csv(out / "runs.csv", index=False)
+    # the EAD and measures tables are always there (empty with headers when recovery_ead.py has not run), so one SQL loads a run
+    for name, cols in (("hromada_ead.csv", EAD_COLS), ("measures.csv", MEASURE_COLS)):
+        if not (out / name).exists():
+            pd.DataFrame(columns=cols).to_csv(out / name, index=False)
     for n in ("price_index.csv", "price_factors.csv"):
         shutil.copy(HERE / n, out / n)
     print(f"{out}: {len(b):,} building rows, {len(h):,} hromada rows")
