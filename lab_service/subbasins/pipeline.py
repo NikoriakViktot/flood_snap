@@ -36,7 +36,7 @@ NODATA = -9999.0
 D8 = {1: (-1, 1), 2: (0, 1), 4: (1, 1), 8: (1, 0), 16: (1, -1), 32: (0, -1), 64: (-1, -1), 128: (-1, 0)}  # WhiteboxTools
 STAGES = {"terrain": 10, "watershed": 15, "burn": 25, "conditioning": 35, "flow": 55, "subbasins": 70, "polygons": 85,
           "packaging": 95}
-OUTLET_SEARCH_M = 1000.0     # the user's point: the channel with the largest drainage within 1 km (as the prototype)
+OUTLET_SEARCH_M = 1000.0     # the burnt channel may lie up to 1 km from the D8 one on a wide flood plain
 
 
 def _wbt(call, **kwargs) -> None:
@@ -217,9 +217,16 @@ def run_subbasins(wbt, paths: dict[str, Path], params: dict, tmp: Path, progress
     orow, ocol = snap["row"] - wr0, snap["col"] - wc0
     n = int(OUTLET_SEARCH_M / res)
     rr, cc = np.mgrid[max(orow - n, 0):min(orow + n + 1, h), max(ocol - n, 0):min(ocol + n + 1, w)]
-    near = np.hypot(rr - orow, cc - ocol) * res <= OUTLET_SEARCH_M
+    dist = np.hypot(rr - orow, cc - ocol) * res
+    near = dist <= OUTLET_SEARCH_M
     cand = (rr[near] * w + cc[near]).astype(np.int64)
-    outlet = int(cand[np.argmax(acc[cand])])
+    # the channel cell whose drainage area matches the delineated basin best (never the largest: within 1 km that may
+    # lie below a confluence and add a whole tributary), a little preference for the nearer cell
+    ok = acc[cand] * ckm2 >= 0.5 * area0
+    if not ok.any():
+        raise P.LabError("the burnt river layer moved the channel away from the outlet: move the point onto the river")
+    cost = np.abs(np.log(acc[cand[ok]] * ckm2 / area0)) + 0.1 * dist[near][ok] / OUTLET_SEARCH_M
+    outlet = int(cand[ok][np.argmin(cost)])
     region = first_pour(down, np.array([outlet], np.int64)) >= 0
     thr = thr_km2 / ckm2
     st = (acc >= thr) & region
