@@ -170,3 +170,12 @@ def test_contract_is_valid_json_and_lists_the_kind():
     assert c["$id"] == "geoproc/subbasin_delineation.v1"
     ev = json.loads((root / "job_event.v1.json").read_text())
     assert "subbasin_delineation" in ev["properties"]["payload"]["properties"]["result"]["properties"]["kind"]["enum"]
+
+
+def test_an_outlet_just_above_a_confluence_stays_on_its_river(district, wbt, tmp_path):
+    # 300 m up the tributary from the junction: the subbasins are the tributary's, never the main stem below the
+    # confluence (the largest drainage within 1 km would be)
+    lon, lat = _lonlat(ROW - 10, TCOL)
+    r = SP.run_subbasins(wbt, district, _params(outlet_lon=lon, outlet_lat=lat, gauges=[], stream_threshold_km2=0.3), tmp_path / "t4")
+    total = max(f["properties"]["total_km2"] for f in r["subbasins"]["features"])
+    assert total < 4.0 and r["summary"]["area_km2"] == pytest.approx(r["summary"]["area_unburned_km2"], rel=0.05)

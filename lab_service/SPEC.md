@@ -273,7 +273,8 @@ code `lab_service/subbasins/` (pipeline, runner, validate), test `tests/test_sub
 1. The basin on the district D8 (as the delineation), then a window = basin bbox + 2 km of the Float32 DEM.
 2. The river layer sent with the request (Hydro river system lines, GeoJSON 4326) is burnt `burn_depth_m` (default 50 m)
    into the window, which is conditioned again (breach_depressions) and routed (D8, accumulation).
-3. Outlet = the largest drainage within 1 km of the snapped point; streams ≥ `stream_threshold_km2` (default 25);
+3. Outlet = the channel cell within 1 km of the snapped point whose drainage area matches the delineated basin best
+   (never simply the largest: that may lie below a confluence); streams ≥ `stream_threshold_km2` (default 25);
    junctions split links; every gauge (≤ 300 m, drainage area closest to the official one) splits its link.
 4. Subbasin = cells draining to a link outlet and not through another; local and total areas, mean / outlet / max
    elevation and slope (unburned DEM), link length and slope, Strahler order, ids from the outlet upstream, names
