@@ -69,6 +69,15 @@ GR4H_MAX_HOURS = int(os.environ.get("GR4H_MAX_HOURS", str(24 * 366 * 3)))     # 
 GR4H_MAX_MEMBERS = int(os.environ.get("GR4H_MAX_MEMBERS", "1024"))             # parameter sets × hyetographs × depth factors
 GR4H_TIMEOUT_S = int(os.environ.get("GR4H_TIMEOUT_S", "900"))
 GR4H_FULL_SERIES_MAX_VALUES = int(os.environ.get("GR4H_FULL_SERIES_MAX_VALUES", "600000"))  # per-member series kept below this
+# -- subbasins (lab_service/subbasins): QSWAT+-style delineation of one basin into a subbasin per stream link ------
+SUBBASIN_PIPELINE_VERSION = "lab.subbasins.v1"
+SUBBASIN_MAX_KM2 = float(os.environ.get("SUBBASIN_MAX_KM2", "12000"))           # window arrays must fit CHILD_MEM_GB
+SUBBASIN_WINDOW_BUFFER_M = float(os.environ.get("SUBBASIN_WINDOW_BUFFER_M", "2000"))  # the burn may move a divide a little
+SUBBASIN_BURN_DEPTH_M = 50.0                                                      # QSWAT+ default
+SUBBASIN_THRESHOLD_KM2 = (1.0, 500.0)                                              # allowed stream-threshold range
+SUBBASIN_DEFAULT_THRESHOLD_KM2 = 25.0                                              # the Prut prototype (218 subbasins to the border)
+SUBBASIN_MAX_GAUGES = 300
+SUBBASIN_MAX_RIVER_LINES = 20000
 LAB_IMAGE_TAG = os.environ.get("LAB_IMAGE_TAG", "")  # provenance: the image this worker runs
 DEM_LABELS = {
     "copernicus_dem": {"label": "Copernicus GLO-30", "version": "Copernicus DEM GLO-30 (2019 release, AWS Open Data mirror)",
