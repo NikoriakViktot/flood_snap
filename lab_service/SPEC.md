@@ -264,6 +264,27 @@ Use: a discharge per reach → stage by linear interpolation on its curve, clamp
 `inundation.py`), then depth = stage − HAND over the reach catchment. Screening only: no bathymetry below the DEM water
 surface, one roughness, uniform flow, no backwater.
 
+## 11. Subbasins (`geoproc.subbasin_delineation`, 2026-10-19)
+
+QSWAT+-style delineation of one basin into a subbasin per stream link (owner: «роби як робить QSWATPlus»; prototype
+geohydroai-storms experiments/prut-network/qswat_delineate.py). Contract `contracts/subbasin_delineation.v1.json`,
+code `lab_service/subbasins/` (pipeline, runner, validate), test `tests/test_subbasins.py`.
+
+1. The basin on the district D8 (as the delineation), then a window = basin bbox + 2 km of the Float32 DEM.
+2. The river layer sent with the request (Hydro river system lines, GeoJSON 4326) is burnt `burn_depth_m` (default 50 m)
+   into the window, which is conditioned again (breach_depressions) and routed (D8, accumulation).
+3. Outlet = the largest drainage within 1 km of the snapped point; streams ≥ `stream_threshold_km2` (default 25);
+   junctions split links; every gauge (≤ 300 m, drainage area closest to the official one) splits its link.
+4. Subbasin = cells draining to a link outlet and not through another; local and total areas, mean / outlet / max
+   elevation and slope (unburned DEM), link length and slope, Strahler order, ids from the outlet upstream, names
+   from the river layer.
+5. Audit: Σ local = basin, total = local + Σ upstream (worst relative error), one outlet, gauge area ratios, the
+   burn's change of the basin area (warning above 2 %).
+
+Products: `subbasins` (GeoJSON), `subbasin_streams` (GeoJSON), `subbasin_table` (CSV); `result.stats` carries the
+summary, audit, gauges and the table. Limit `SUBBASIN_MAX_KM2` 12 000 km². Prut to the border (8 882 km², 25 km²,
+11 gauges): 212 subbasins in 11 s, peak RSS 1.1 GB, gauge areas within 0–2 % of the official ones (Ільці +22 %).
+
 ## 9. Verification
 
 ```bash
