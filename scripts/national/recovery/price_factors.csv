@@ -1,0 +1,10 @@
+variant,class,factor,currency,price_year,note
+uah_sssu,RES,76.7332,UAH,2026,€2010 × NBU 10.5317 UAH/€ × SSSU 01011 2010→2026-M08 ×7.286
+eur_eurostat,RES,1.4766,EUR,2023,€2010 × Eurostat EU27 construction cost (residential) 78.9→116.5 (2023)
+eur_2010_jrc,RES,1.0,EUR,2010,JRC as published
+uah_sssu,COM,78.0158,UAH,2026,€2010 × NBU 10.5317 UAH/€ × SSSU 01012 2010→2026-M08 ×7.408
+eur_eurostat,COM,1.4766,EUR,2023,€2010 × Eurostat EU27 construction cost (residential) 78.9→116.5 (2023)
+eur_2010_jrc,COM,1.0,EUR,2010,JRC as published
+uah_sssu,IND,78.0158,UAH,2026,€2010 × NBU 10.5317 UAH/€ × SSSU 01012 2010→2026-M08 ×7.408
+eur_eurostat,IND,1.4766,EUR,2023,€2010 × Eurostat EU27 construction cost (residential) 78.9→116.5 (2023)
+eur_2010_jrc,IND,1.0,EUR,2010,JRC as published
