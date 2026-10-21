@@ -11,6 +11,8 @@ import hashlib
 import json
 import os
 import shutil
+import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,24 +64,36 @@ class TerrainStore:
         self.cache = Path(cache_root or settings.CACHE_ROOT)
         self.cache.mkdir(parents=True, exist_ok=True)
         self._districts: list[tuple[District, object]] | None = None
+        self._districts_lock = threading.Lock()   # one load at a time: /internal/health and requests arrive together
         self._manifests: dict[str, dict] = {}
         self._s3 = None
 
     # ---- fetching ------------------------------------------------------------------------------
     def _fetch(self, key: str, dst: Path, max_age_s: float | None = None) -> Path:
-        """key relative to the terrain prefix → local file (cached)."""
+        """key relative to the terrain prefix → local file (cached).
+
+        Each download goes to its own temporary file, so two requests refreshing the same key cannot rename each
+        other's file away (FileNotFoundError on AWS, 2026-10-21). A stale copy is served when the refresh fails."""
         if dst.exists() and (max_age_s is None or time.time() - dst.stat().st_mtime < max_age_s):
             return dst
         dst.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dst.with_suffix(dst.suffix + ".part")
-        if settings.TERRAIN_LOCAL:
-            shutil.copyfile(Path(settings.TERRAIN_LOCAL) / key, tmp)
-        else:
-            if self._s3 is None:
-                import boto3
-                self._s3 = boto3.client("s3")
-            self._s3.download_file(settings.S3_BUCKET, f"{settings.TERRAIN_PREFIX}/{key}", str(tmp))
-        os.replace(tmp, dst)
+        fd, name = tempfile.mkstemp(dir=dst.parent, prefix=f".{dst.name}.", suffix=".part")
+        os.close(fd)
+        tmp = Path(name)
+        try:
+            if settings.TERRAIN_LOCAL:
+                shutil.copyfile(Path(settings.TERRAIN_LOCAL) / key, tmp)
+            else:
+                if self._s3 is None:
+                    import boto3
+                    self._s3 = boto3.client("s3")
+                self._s3.download_file(settings.S3_BUCKET, f"{settings.TERRAIN_PREFIX}/{key}", str(tmp))
+            os.replace(tmp, dst)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            if dst.exists():
+                return dst
+            raise
         return dst
 
     def _json(self, key: str, max_age_s: float = 3600) -> dict:
@@ -90,16 +104,22 @@ class TerrainStore:
         return [d for d, _ in self._load_districts()]
 
     def _load_districts(self):
-        if self._districts is None:
-            index = self._json("_districts/index.json")
-            out = []
-            for d in index:
-                g = json.loads(self._fetch(f"_districts/{d['slug']}.geojson", self.cache / "_districts" / f"{d['slug']}.geojson", 86400).read_text())
-                geom = to_wgs84(shape(g["features"][0]["geometry"] if g.get("type") == "FeatureCollection" else g.get("geometry", g)),
-                                crs_of(g))
-                out.append((District(d["code"], d["slug"], d["name_ua"], float(d["km2"])), prep(geom)))
-            self._districts = out
+        if self._districts is not None:
+            return self._districts
+        with self._districts_lock:
+            if self._districts is None:
+                self._districts = self._read_districts()
         return self._districts
+
+    def _read_districts(self):
+        index = self._json("_districts/index.json")
+        out = []
+        for d in index:
+            g = json.loads(self._fetch(f"_districts/{d['slug']}.geojson", self.cache / "_districts" / f"{d['slug']}.geojson", 86400).read_text())
+            geom = to_wgs84(shape(g["features"][0]["geometry"] if g.get("type") == "FeatureCollection" else g.get("geometry", g)),
+                            crs_of(g))
+            out.append((District(d["code"], d["slug"], d["name_ua"], float(d["km2"])), prep(geom)))
+        return out
 
     def district_by_code(self, code: str) -> District | None:
         return next((d for d in self.districts() if d.code == code or d.slug == code), None)
