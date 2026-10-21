@@ -1,9 +1,9 @@
 # Flood Lab (geoproc + geoproc-worker) -> GeoHydroAI EC2 server, compose project `server` on docker network `geoai_web`.
 #
-# 1. build  — GitHub-hosted runner: the DEM worker base image (ubuntu 22.04 + GDAL + WhiteboxTools) and the lab image on
+# 1. build  — self-hosted runner on Hetzner (label `hetzner`): the DEM worker base image (ubuntu 22.04 + GDAL + WhiteboxTools) and the lab image on
 #             top of it, pushed to GHCR as ghcr.io/<owner>/geohydroai-lab:<sha> (+ :latest). The production host
 #             (t3.large, 2 vCPU, 7.8 GB) no longer builds anything (server audit 2026-10-13).
-# 2. deploy — self-hosted runner ON THE SERVER: pulls the image, tags it geohydroai-lab:latest for the compose file,
+# 2. deploy — self-hosted runner ON EACH SERVER (AWS production, Hetzner staging): pulls the image, tags it geohydroai-lab:latest for the compose file,
 #             recreates both containers and waits for /internal/health.
 name: Deploy Flood Lab (geoproc)
 
@@ -22,8 +22,9 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  # self-hosted on Hetzner (8 vCPU) since 2026-10-21: GitHub-hosted minutes cost money on this private repo
   build:
-    runs-on: ubuntu-latest
+    runs-on: [hetzner]
     timeout-minutes: 60
     permissions:
       contents: read
@@ -73,9 +74,18 @@ jobs:
             ${{ steps.meta.outputs.image }}:latest
           labels: org.opencontainers.image.revision=${{ github.sha }}
 
+  # Two servers during the move to Hetzner (2026-10-21): `aws` = production (EC2), `hetzner` = staging.geohydroai.org
+  # (label `hetzner` only; its /home/ubuntu/flood_lab/lab.env is the staging copy with a read-only S3 key).
   deploy:
     needs: build
-    runs-on: [self-hosted, Linux, X64]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aws, runner: [self-hosted, Linux, X64] }
+          - { target: hetzner, runner: [hetzner] }
+    name: deploy (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -96,7 +106,8 @@ jobs:
         run: |
           test -f /home/ubuntu/flood_lab/lab.env || { echo "::error::/home/ubuntu/flood_lab/lab.env is missing (see deploy/server/lab.env.example)"; exit 1; }
           cp /home/ubuntu/flood_lab/lab.env deploy/server/lab.env
-          sudo mkdir -p /data/lab && sudo chown 0:0 /data/lab
+          # the containers run as root; the Hetzner runner has no sudo, its /data/lab is prepared once by hand
+          [ -d /data/lab ] && [ "$(stat -c %u /data/lab)" = 0 ] || { sudo mkdir -p /data/lab && sudo chown 0:0 /data/lab; }
           docker compose -f deploy/server/docker-compose.lab.yml up -d --no-build --force-recreate
       - name: Health
         run: |
