@@ -79,18 +79,11 @@ jobs:
             ${{ steps.meta.outputs.image }}:latest
           labels: org.opencontainers.image.revision=${{ github.sha }}
 
-  # Two servers during the move to Hetzner (2026-10-21): `aws` = production (EC2), `hetzner` = staging.geohydroai.org
-  # (label `hetzner` only; its /home/ubuntu/flood_lab/lab.env is the staging copy with a read-only S3 key).
+  # Hetzner only since the switch of geohydroai.org (2026-10-21). Its /home/ubuntu/flood_lab/lab.env decides staging
+  # (read-only S3 key) vs production.
   deploy:
     needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { target: aws, runner: [self-hosted, Linux, X64] }
-          - { target: hetzner, runner: [hetzner] }
-    name: deploy (${{ matrix.target }})
-    runs-on: ${{ matrix.runner }}
+    runs-on: [hetzner]
     timeout-minutes: 30
     permissions:
       contents: read
