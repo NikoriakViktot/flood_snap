@@ -33,6 +33,11 @@ jobs:
       image: ${{ steps.meta.outputs.image }}
       base: ${{ steps.meta.outputs.base }}
     steps:
+      - name: Hand root-owned files of an earlier run back to the runner user
+        run: |
+          # the Lab tests run as root in the base image and leave __pycache__ in the checkout; actions/checkout then
+          # cannot clean it (EACCES) on a self-hosted runner
+          [ -d "$GITHUB_WORKSPACE" ] && docker run --rm -v "$GITHUB_WORKSPACE":/w alpine:3.20 chown -R "$(id -u):$(id -g)" /w || true
       - uses: actions/checkout@v4
       - id: meta
         run: |
@@ -60,7 +65,7 @@ jobs:
       # lab_service/tests since the 2026-10-13 audit); a failure stops the deploy before the lab image is built
       - name: Lab tests in the base image
         run: |
-          docker run --rm -v "$PWD:/w" -w /w --entrypoint sh "${{ steps.meta.outputs.base }}:${{ github.sha }}" -c \
+          docker run --rm -v "$PWD:/w" -w /w -e PYTHONDONTWRITEBYTECODE=1 --entrypoint sh "${{ steps.meta.outputs.base }}:${{ github.sha }}" -c \
             "pip install -q 'fastapi==0.115.*' 'uvicorn[standard]==0.30.*' 'pyjwt==2.9.*' boto3 redis httpx pytest fakeredis jsonschema 'celery>=5.4,<6' && python3 -m pytest -q -p no:cacheprovider lab_service/tests"
       - name: Build and push the lab image
         uses: docker/build-push-action@v6
