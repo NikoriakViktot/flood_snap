@@ -1,0 +1,158 @@
+{
+ "schema": "geohydroai.gr4h_releases/v1",
+ "time_step": "1d",
+ "note": "Daily CemaNeige-GR4J parameter releases. A release maps each gauge to one parameter file and says whether its forecast may be published. The worker uses settings.GR4J_PARAMS_RELEASE (env GR4J_PARAMS_RELEASE) or, when it is empty, `default`; a job may name another release (params_release) for comparisons. Rollback = point GR4J_PARAMS_RELEASE back at the previous release and restart the worker. Hourly GR4H sets (<post>.json) are not part of a release.",
+ "default": "prut-network-gr4j-climuad-2026-10-16",
+ "releases": {
+  "prut-network-gr4j-climuad-2026-10-16": {
+   "status": "operational",
+   "since": "2026-10-16",
+   "forcing": "calibrated on ClimUAd daily (20:00→20:00 Kyiv day), objective KGE′(Q), split sample 1991-2005 / 2006-2020",
+   "depth_factors": [
+    1.0,
+    1.25
+   ],
+   "note": "the release in operation until the owner switches; its ensemble keeps the precipitation ×1.25 members exactly as before (rollback target)",
+   "posts": {
+    "42130": {
+     "file": "42130.1d.json",
+     "publish": true,
+     "quality": "operational"
+    },
+    "42136": {
+     "file": "42136.1d.json",
+     "publish": true,
+     "quality": "operational"
+    },
+    "42137": {
+     "file": "42137.1d.json",
+     "publish": true,
+     "quality": "operational"
+    },
+    "42148": {
+     "file": "42148.1d.json",
+     "publish": true,
+     "quality": "operational"
+    },
+    "42176": {
+     "file": "42176.1d.json",
+     "publish": false,
+     "quality": "unreliable",
+     "note": "never published as a forecast (owner 2026-10-22): kept runnable for the network water balance only"
+    },
+    "42187": {
+     "file": "42187.1d.json",
+     "publish": true,
+     "quality": "operational"
+    },
+    "42194": {
+     "file": "42194.1d.json",
+     "publish": true,
+     "quality": "operational"
+    },
+    "42198": {
+     "file": "42198.1d.json",
+     "publish": true,
+     "quality": "operational"
+    },
+    "42201": {
+     "file": "42201.1d.json",
+     "publish": false,
+     "quality": "unreliable",
+     "note": "never published as a forecast (owner 2026-10-22): kept runnable for the network water balance only"
+    },
+    "42202": {
+     "file": "42202.1d.json",
+     "publish": true,
+     "quality": "operational"
+    },
+    "42249": {
+     "file": "42249.1d.json",
+     "publish": false,
+     "quality": "unreliable",
+     "note": "never published as a forecast (owner 2026-10-22): kept runnable for the network water balance only"
+    }
+   }
+  },
+  "gr4j-era5land-2026.10": {
+   "status": "candidate",
+   "since": "2026-10-22",
+   "previous": "prut-network-gr4j-climuad-2026-10-16",
+   "forcing": "calibrated on ERA5-Land daily_climuad, basin mean, 20:00→20:00 Kyiv day; objective 0.5·KGE′(Q) + 0.5·KGE′(1/Q); split sample 1981-2001 / 2002-2023, reference 1981-2023",
+   "depth_factors": [
+    1.0
+   ],
+   "note": "geohydroai-storms PR #8 (era5land-recal). The ensemble is the parameter sets only: no precipitation multiplier. Expects the ERA5-Land forcing (Django); with the old SYNOP×factor forcing it is a transfer.",
+   "posts": {
+    "42130": {
+     "file": "42130.1d.json",
+     "publish": true,
+     "quality": "operational",
+     "note": "not a warning gauge, not recalibrated: the ClimUAd sets carry over unchanged"
+    },
+    "42136": {
+     "file": "gr4j-era5land-2026.10/42136.1d.json",
+     "publish": true,
+     "quality": "verified",
+     "note": "ERA5-Land recalibration; improvement confirmed on split-sample validation and 2021-2023 (geohydroai-storms PR #8)"
+    },
+    "42137": {
+     "file": "gr4j-era5land-2026.10/42137.1d.json",
+     "publish": true,
+     "quality": "verified",
+     "note": "ERA5-Land recalibration; improvement confirmed on split-sample validation and 2021-2023 (geohydroai-storms PR #8)"
+    },
+    "42148": {
+     "file": "gr4j-era5land-2026.10/42148.1d.json",
+     "publish": true,
+     "quality": "verified",
+     "note": "ERA5-Land recalibration; improvement confirmed on split-sample validation and 2021-2023 (geohydroai-storms PR #8)"
+    },
+    "42176": {
+     "file": "gr4j-era5land-2026.10/42176.1d.json",
+     "publish": false,
+     "quality": "unreliable",
+     "note": "never published as a forecast (owner 2026-10-22): kept runnable for the network water balance only; ERA5-Land sets (less bad on validation and 2021-2023)"
+    },
+    "42187": {
+     "file": "gr4j-era5land-2026.10/42187.1d.json",
+     "publish": true,
+     "quality": "verified",
+     "note": "ERA5-Land recalibration; improvement confirmed on split-sample validation and 2021-2023 (geohydroai-storms PR #8)"
+    },
+    "42194": {
+     "file": "gr4j-era5land-2026.10/42194.1d.json",
+     "publish": true,
+     "quality": "verified",
+     "note": "ERA5-Land recalibration; improvement confirmed on split-sample validation and 2021-2023 (geohydroai-storms PR #8)"
+    },
+    "42198": {
+     "file": "42198.1d.json",
+     "publish": true,
+     "quality": "operational",
+     "candidate": "gr4j-era5land-2026.10/42198.1d.json",
+     "note": "control: the ClimUAd sets stay (the ERA5-Land sets did not beat them on validation); the ERA5-Land sets are a non-default candidate (param_variant: candidate)"
+    },
+    "42201": {
+     "file": "gr4j-era5land-2026.10/42201.1d.json",
+     "publish": false,
+     "quality": "unreliable",
+     "note": "never published as a forecast (owner 2026-10-22): kept runnable for the network water balance only; ERA5-Land sets"
+    },
+    "42202": {
+     "file": "42202.1d.json",
+     "publish": true,
+     "quality": "operational",
+     "candidate": "gr4j-era5land-2026.10/42202.1d.json",
+     "note": "control: the ClimUAd sets stay (the ERA5-Land sets did not beat them on validation); the ERA5-Land sets are a non-default candidate (param_variant: candidate)"
+    },
+    "42249": {
+     "file": "gr4j-era5land-2026.10/42249.1d.json",
+     "publish": false,
+     "quality": "unreliable",
+     "note": "never published as a forecast (owner 2026-10-22): kept runnable for the network water balance only; not publishable at all (record changes regime in 2013/14, PR #8). ERA5-Land sets calibrated on 2014-2023 are the least bad: 2021-2023 KGE' 0.14 / KGE'(1/Q) -0.05 / bias +0.68 against -0.02 / -0.67 / +0.86 for the ClimUAd set"
+    }
+   }
+  }
+ }
+}

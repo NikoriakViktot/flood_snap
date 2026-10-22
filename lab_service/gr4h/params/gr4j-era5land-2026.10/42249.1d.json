@@ -1,0 +1,147 @@
+{
+ "schema": "geohydroai.gr4h_params/v1",
+ "model": "CemaNeigeGR4J",
+ "time_step": "1d",
+ "post_id": "42249",
+ "name": "Прут — Ворохта",
+ "version": "gr4j-era5land-2026.10",
+ "source_version": "prut-gr4j-era5land-2026-10-22",
+ "source": "geohydroai-storms experiments/era5land-recal/calibrate.R: airGR 1.7.9 Calibration_Michel, forcing ERA5-Land (CDS 0.1°, basin area-weighted, 20:00→20:00 Kyiv day), T lapsed to the basin mean FABDEM elevation, PET Oudin, CemaNeige 5 layers; Q over the official area; geohydroai-storms PR #8 @ 2e88eb8 results/proposed_params/42249.1d.json",
+ "calibration": {
+  "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor",
+  "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+  "engine": "airGR 1.7.9 Calibration_Michel, CemaNeige-GR4J, 5 elevation layers, PET Oudin",
+  "periods": {
+   "split_sample": [
+    "1981-2001",
+    "2002-2023"
+   ],
+   "reference": "1981-2023",
+   "warm_up": [
+    "1979-12…1980-12",
+    "2001"
+   ]
+  },
+  "qc_mask": "observations 1981-01-01…2013-12-31 excluded: annual runoff / ERA5-Land P above 1 (0.6-1.38, 12 of 33 years > 1) until 2013, 0.28-0.73 from 2014: two regimes that one rainfall-runoff model cannot both match; the forecast must match today's record, so only 2014-2023 enters (rating / section change suspected, to be confirmed)",
+  "sets": "reference (1981-2023) + C_S1/C_S2 split-sample + MC1-3 behavioural (C ≥ C_ref − 0.03); sets at airGR bounds dropped"
+ },
+ "forcing_contract": {
+  "precip": "ERA5-Land basin mean, no factor (ICON-EU adjusted to it in operation)",
+  "day": "20:00 Kyiv → 20:00 Kyiv",
+  "temperature": "ERA5-Land t2m lapsed −6.5 K/km to z_mean",
+  "area_km2": 48.3
+ },
+ "skill": {
+  "note": "on ERA5-Land forcing (not the operational chain); split-sample validation = mean of both directions; 'current' = the prut-network-gr4j-climuad-2026-10-16 reference set run on the same ERA5-Land forcing",
+  "validation": {
+   "n_directions": 0,
+   "kge2": null,
+   "nse": null,
+   "nse_log": null,
+   "kge2_inv": null,
+   "lowflow_bias": null,
+   "q7min_ratio_med": null,
+   "peak_ratio_med": null
+  },
+  "current_same_forcing": {
+   "kge2": 0.48,
+   "nse": -0.14,
+   "nse_log": -1.01,
+   "kge2_inv": -0.04,
+   "lowflow_bias": 0.57,
+   "q7min_ratio_med": 0.4,
+   "peak_ratio_med": 0.57
+  },
+  "2021_2023": {
+   "new": {
+    "kge2": 0.14,
+    "kge2_inv": -0.05,
+    "bias": 0.68,
+    "lowflow_bias": 0.48,
+    "q7min_ratio_med": 0.9
+   },
+   "current": {
+    "kge2": -0.02,
+    "kge2_inv": -0.67,
+    "bias": 0.86,
+    "lowflow_bias": 0.23,
+    "q7min_ratio_med": 0.47
+   }
+  }
+ },
+ "note": "set 'reference' = calibrated on the whole 1981-2023 record; C_S1/C_S2 = split-sample calibrations (independently validated); MC1-3 = behavioural sets around the reference (criterion within 0.03 on 1981-2023). Ensemble = these sets × precip 1.0 only. Model result, not an observation.",
+ "sets": [
+  {
+   "id": "reference",
+   "X1": 1022.494,
+   "X2": -0.3572,
+   "X3": 11.8224,
+   "X4": 1.2613,
+   "CNX1": 0.01,
+   "CNX2": 30.3162,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2023",
+    "kge2_full": 0.397,
+    "nse_log_full": 0.012,
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor",
+    "qc_mask": "observations 1981-01-01…2013-12-31 excluded: annual runoff / ERA5-Land P above 1 (0.6-1.38, 12 of 33 years > 1) until 2013, 0.28-0.73 from 2014: two regimes that one rainfall-runoff model cannot both match; the forecast must match today's record, so only 2014-2023 enters (rating / section change suspected, to be confirmed)"
+   }
+  },
+  {
+   "id": "MC1",
+   "X1": 1173.0202,
+   "X2": -0.3353,
+   "X3": 4.5905,
+   "X4": 2.1345,
+   "CNX1": 0.031,
+   "CNX2": 78.1228,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2023 (Monte-Carlo, behavioural)",
+    "kge2_full": 0.37,
+    "nse_log_full": -0.024,
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor",
+    "qc_mask": "observations 1981-01-01…2013-12-31 excluded: annual runoff / ERA5-Land P above 1 (0.6-1.38, 12 of 33 years > 1) until 2013, 0.28-0.73 from 2014: two regimes that one rainfall-runoff model cannot both match; the forecast must match today's record, so only 2014-2023 enters (rating / section change suspected, to be confirmed)"
+   }
+  },
+  {
+   "id": "MC2",
+   "X1": 1356.6106,
+   "X2": -0.4149,
+   "X3": 6.192,
+   "X4": 2.185,
+   "CNX1": 0.0553,
+   "CNX2": 14.8667,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2023 (Monte-Carlo, behavioural)",
+    "kge2_full": 0.366,
+    "nse_log_full": -0.033,
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor",
+    "qc_mask": "observations 1981-01-01…2013-12-31 excluded: annual runoff / ERA5-Land P above 1 (0.6-1.38, 12 of 33 years > 1) until 2013, 0.28-0.73 from 2014: two regimes that one rainfall-runoff model cannot both match; the forecast must match today's record, so only 2014-2023 enters (rating / section change suspected, to be confirmed)"
+   }
+  },
+  {
+   "id": "MC3",
+   "X1": 749.8343,
+   "X2": -0.3137,
+   "X3": 30.0714,
+   "X4": 1.866,
+   "CNX1": 0.0591,
+   "CNX2": 18.3008,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2023 (Monte-Carlo, behavioural)",
+    "kge2_full": 0.37,
+    "nse_log_full": -0.058,
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor",
+    "qc_mask": "observations 1981-01-01…2013-12-31 excluded: annual runoff / ERA5-Land P above 1 (0.6-1.38, 12 of 33 years > 1) until 2013, 0.28-0.73 from 2014: two regimes that one rainfall-runoff model cannot both match; the forecast must match today's record, so only 2014-2023 enters (rating / section change suspected, to be confirmed)"
+   }
+  }
+ ]
+}

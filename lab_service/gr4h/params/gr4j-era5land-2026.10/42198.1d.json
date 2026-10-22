@@ -1,0 +1,189 @@
+{
+ "schema": "geohydroai.gr4h_params/v1",
+ "model": "CemaNeigeGR4J",
+ "time_step": "1d",
+ "post_id": "42198",
+ "name": "Чорний Черемош — Верховина",
+ "version": "gr4j-era5land-2026.10",
+ "source_version": "prut-gr4j-era5land-2026-10-22",
+ "source": "geohydroai-storms experiments/era5land-recal/calibrate.R: airGR 1.7.9 Calibration_Michel, forcing ERA5-Land (CDS 0.1°, basin area-weighted, 20:00→20:00 Kyiv day), T lapsed to the basin mean FABDEM elevation, PET Oudin, CemaNeige 5 layers; Q over the official area; geohydroai-storms PR #8 @ 2e88eb8 results/proposed_params/42198.1d.json",
+ "calibration": {
+  "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor",
+  "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+  "engine": "airGR 1.7.9 Calibration_Michel, CemaNeige-GR4J, 5 elevation layers, PET Oudin",
+  "periods": {
+   "split_sample": [
+    "1981-2001",
+    "2002-2023"
+   ],
+   "reference": "1981-2023",
+   "warm_up": [
+    "1979-12…1980-12",
+    "2001"
+   ]
+  },
+  "qc_mask": "observations 1990-01-01…1997-12-31 excluded: annual runoff / ERA5-Land P 0.18-0.26 in 1990-1997 against 0.5-0.97 before and after: the same break found in the cheremosh-network study (record about half the expected flow); excluded from the criteria",
+  "sets": "reference (1981-2023) + C_S1/C_S2 split-sample + MC1-3 behavioural (C ≥ C_ref − 0.03); sets at airGR bounds dropped"
+ },
+ "forcing_contract": {
+  "precip": "ERA5-Land basin mean, no factor (ICON-EU adjusted to it in operation)",
+  "day": "20:00 Kyiv → 20:00 Kyiv",
+  "temperature": "ERA5-Land t2m lapsed −6.5 K/km to z_mean",
+  "area_km2": 657.0
+ },
+ "skill": {
+  "note": "on ERA5-Land forcing (not the operational chain); split-sample validation = mean of both directions; 'current' = the prut-network-gr4j-climuad-2026-10-16 reference set run on the same ERA5-Land forcing",
+  "validation": {
+   "n_directions": 2,
+   "kge2": 0.58,
+   "nse": 0.36,
+   "nse_log": 0.33,
+   "kge2_inv": 0.46,
+   "lowflow_bias": 0.21,
+   "q7min_ratio_med": 1.1,
+   "peak_ratio_med": 0.76
+  },
+  "current_same_forcing": {
+   "kge2": 0.67,
+   "nse": 0.47,
+   "nse_log": 0.51,
+   "kge2_inv": 0.64,
+   "lowflow_bias": 0.26,
+   "q7min_ratio_med": 1.07,
+   "peak_ratio_med": 0.62
+  },
+  "2021_2023": {
+   "new": {
+    "kge2": 0.73,
+    "kge2_inv": 0.67,
+    "bias": -0.05,
+    "lowflow_bias": -0.03,
+    "q7min_ratio_med": 0.68
+   },
+   "current": {
+    "kge2": 0.74,
+    "kge2_inv": 0.63,
+    "bias": -0.06,
+    "lowflow_bias": 0.09,
+    "q7min_ratio_med": 0.91
+   }
+  }
+ },
+ "note": "set 'reference' = calibrated on the whole 1981-2023 record; C_S1/C_S2 = split-sample calibrations (independently validated); MC1-3 = behavioural sets around the reference (criterion within 0.03 on 1981-2023). Ensemble = these sets × precip 1.0 only. Model result, not an observation.",
+ "sets": [
+  {
+   "id": "reference",
+   "X1": 478.1861,
+   "X2": 0.2218,
+   "X3": 65.3659,
+   "X4": 1.0758,
+   "CNX1": 0.001,
+   "CNX2": 6.6305,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2023",
+    "kge2_full": 0.759,
+    "nse_log_full": 0.553,
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor",
+    "qc_mask": "observations 1990-01-01…1997-12-31 excluded: annual runoff / ERA5-Land P 0.18-0.26 in 1990-1997 against 0.5-0.97 before and after: the same break found in the cheremosh-network study (record about half the expected flow); excluded from the criteria"
+   }
+  },
+  {
+   "id": "C_S1",
+   "X1": 592.6033,
+   "X2": -1.1026,
+   "X3": 58.1561,
+   "X4": 1.0876,
+   "CNX1": 0.001,
+   "CNX2": 7.3267,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2001",
+    "kge2_full": 0.713,
+    "nse_log_full": 0.435,
+    "kge2_val": 0.665,
+    "nse_log_val": 0.204,
+    "validation": "2002-2023",
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor",
+    "qc_mask": "observations 1990-01-01…1997-12-31 excluded: annual runoff / ERA5-Land P 0.18-0.26 in 1990-1997 against 0.5-0.97 before and after: the same break found in the cheremosh-network study (record about half the expected flow); excluded from the criteria"
+   }
+  },
+  {
+   "id": "C_S2",
+   "X1": 660.6066,
+   "X2": 0.4995,
+   "X3": 27.9007,
+   "X4": 1.1623,
+   "CNX1": 0.0095,
+   "CNX2": 5.5132,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "2002-2023",
+    "kge2_full": 0.697,
+    "nse_log_full": 0.541,
+    "kge2_val": 0.498,
+    "nse_log_val": 0.466,
+    "validation": "1981-2001",
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor",
+    "qc_mask": "observations 1990-01-01…1997-12-31 excluded: annual runoff / ERA5-Land P 0.18-0.26 in 1990-1997 against 0.5-0.97 before and after: the same break found in the cheremosh-network study (record about half the expected flow); excluded from the criteria"
+   }
+  },
+  {
+   "id": "MC1",
+   "X1": 207.879,
+   "X2": 0.8959,
+   "X3": 173.6004,
+   "X4": 0.8853,
+   "CNX1": 0.0496,
+   "CNX2": 5.7935,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2023 (Monte-Carlo, behavioural)",
+    "kge2_full": 0.732,
+    "nse_log_full": 0.487,
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor",
+    "qc_mask": "observations 1990-01-01…1997-12-31 excluded: annual runoff / ERA5-Land P 0.18-0.26 in 1990-1997 against 0.5-0.97 before and after: the same break found in the cheremosh-network study (record about half the expected flow); excluded from the criteria"
+   }
+  },
+  {
+   "id": "MC2",
+   "X1": 517.3112,
+   "X2": 0.0746,
+   "X3": 53.7557,
+   "X4": 1.9795,
+   "CNX1": 0.0498,
+   "CNX2": 12.993,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2023 (Monte-Carlo, behavioural)",
+    "kge2_full": 0.701,
+    "nse_log_full": 0.54,
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor",
+    "qc_mask": "observations 1990-01-01…1997-12-31 excluded: annual runoff / ERA5-Land P 0.18-0.26 in 1990-1997 against 0.5-0.97 before and after: the same break found in the cheremosh-network study (record about half the expected flow); excluded from the criteria"
+   }
+  },
+  {
+   "id": "MC3",
+   "X1": 255.9125,
+   "X2": 0.2083,
+   "X3": 168.0298,
+   "X4": 0.5585,
+   "CNX1": 0.0,
+   "CNX2": 15.2009,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2023 (Monte-Carlo, behavioural)",
+    "kge2_full": 0.707,
+    "nse_log_full": 0.541,
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor",
+    "qc_mask": "observations 1990-01-01…1997-12-31 excluded: annual runoff / ERA5-Land P 0.18-0.26 in 1990-1997 against 0.5-0.97 before and after: the same break found in the cheremosh-network study (record about half the expected flow); excluded from the criteria"
+   }
+  }
+ ]
+}

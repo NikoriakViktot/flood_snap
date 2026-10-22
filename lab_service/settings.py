@@ -57,6 +57,10 @@ PNG_MIN_ZOOM = int(os.environ.get("PNG_MIN_ZOOM", "10"))  # large basins step do
 GR4H_PIPELINE_VERSION = "lab.gr4.v2"
 TIME_STEPS = ("1d", "1h")
 DEFAULT_TIME_STEP = "1d"   # owner, 2026-10-17: our hourly precipitation is too uncertain to be the default
+# daily parameter release (gr4h/params/releases.json): empty = the manifest's `default` (the release in operation).
+# Switch to the ERA5-Land sets with GR4J_PARAMS_RELEASE=gr4j-era5land-2026.10; roll back by clearing it (or naming
+# prut-network-gr4j-climuad-2026-10-16) and restarting the worker. A job may still name a release (params_release).
+GR4J_PARAMS_RELEASE = os.environ.get("GR4J_PARAMS_RELEASE", "").strip()
 GR4J_MAX_RUN_DAYS = int(os.environ.get("GR4J_MAX_RUN_DAYS", "366"))           # daily: a season or a year
 GR4J_MAX_DAYS = int(os.environ.get("GR4J_MAX_DAYS", str(366 * 30)))           # daily forcing length
 # memory guard (all Lab tasks): the host's MemAvailable before a job starts; below it the job waits and is retried

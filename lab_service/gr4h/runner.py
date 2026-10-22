@@ -47,8 +47,27 @@ def statement(step: str, model: str) -> str:
     return STATEMENT.format(model=model)
 
 
-def limitations(step: str) -> list[str]:
-    return LIMITATIONS_STEP[step] + LIMITATIONS_COMMON
+UNPUBLISHED = ("this gauge's parameter sets are flagged unreliable: the run serves the network water balance and is not "
+               "published as a forecast")
+
+
+def limitations(step: str, publish: bool = True) -> list[str]:
+    return LIMITATIONS_STEP[step] + LIMITATIONS_COMMON + ([] if publish else [UNPUBLISHED])
+
+
+def model_version(p: dict) -> str | None:
+    """The parameter version a run used (params file `version`, e.g. gr4j-era5land-2026.10): carried in every product so
+    the platform can expose it as model_version."""
+    return p.get("model_version") or p["parameters"].get("version") or ("inline" if not p.get("post_id") else None)
+
+
+def release_info(p: dict) -> dict:
+    """Release, variant and publication flag of the parameter sets (daily releases, params/releases.json). A set that is not
+    published (publish false, quality 'unreliable') still runs — the network water balance needs it — but its forecast
+    must not be shown as a reliable forecast."""
+    ps = p["parameters"]
+    return {"model_version": model_version(p), "params_release": p.get("params_release"), "param_variant": ps.get("variant"),
+            "publish": bool(ps.get("publish", True)), "quality": ps.get("quality")}
 
 
 def _step_s(p: dict) -> int:
@@ -117,7 +136,7 @@ def hydrograph_product(p: dict, time_utc: list[str], members: list[dict], q: np.
     step_s = _step_s(p)
     model = p.get("model") or ("CemaNeigeGR4J" if step == "1d" else "CemaNeigeGR4H")
     out = {"schema": "geohydroai.hydrograph/v1", "engine": p.get("engine") or ("airgr-gr4j" if step == "1d" else "airgr-gr4h"),
-           "model": model, "time_step": step, "units": {"q": "m3/s" + (" (daily mean)" if step == "1d" else ""), "p": "mm/d" if step == "1d" else "mm/h"}, "basin_area_km2": p["basin"]["area_km2"], "post_id": p.get("post_id"),
+           "model": model, **release_info(p), "time_step": step, "units": {"q": "m3/s" + (" (daily mean)" if step == "1d" else ""), "p": "mm/d" if step == "1d" else "mm/h"}, "basin_area_km2": p["basin"]["area_km2"], "post_id": p.get("post_id"),
            "forcing_source": p.get("forcing_source"), "forcing_sha256": p["forcing"]["sha256"], "time_utc": time_utc,
            "reference": [round(float(x), 3) for x in ref],
            "p5": [round(float(x), 3) for x in pct["p5"]], "p50": [round(float(x), 3) for x in pct["p50"]], "p95": [round(float(x), 3) for x in pct["p95"]],
@@ -126,7 +145,7 @@ def hydrograph_product(p: dict, time_utc: list[str], members: list[dict], q: np.
            "peak": {"reference_m3s": round(float(ref.max()), 3), "reference_time": time_utc[int(np.argmax(ref))],
                     **{f"{k}_m3s": round(float(v.max()), 3) for k, v in pct.items()}, **{f"{k}_time": time_utc[peak_i[k]] for k in pct},
                     "volume_reference_mm": round(float(ref.sum() * step_s / (p["basin"]["area_km2"] * 1e6) * 1000), 2)},
-           "statement": statement(step, model), "limitations": limitations(step)}
+           "statement": statement(step, model), "limitations": limitations(step, release_info(p)["publish"])}
     if full:
         out["q_by_member"] = [[round(float(x), 2) for x in row] for row in q]
     else:
@@ -185,7 +204,7 @@ def gr4h_child(job: dict, out_dir: str, conn) -> None:
         param_sha = _sha(p["parameters"]["sets"])
         meta = {"schema": "geohydroai.gr4h_run/v1", "job_id": job["job_id"], "runoff_run_id": p.get("runoff_run_id"),
                 "basin_id": p.get("basin_id"), "hand_model_id": p.get("hand_model_id"), "project_id": p.get("project_id"),
-                "pipeline_version": settings.GR4H_PIPELINE_VERSION, "engine": engine, "model": model, "engine_version": versions.get("airGR"),
+                "pipeline_version": settings.GR4H_PIPELINE_VERSION, **release_info(p), "engine": engine, "model": model, "engine_version": versions.get("airGR"),
                 "r_version": versions.get("R"), "image": settings.LAB_IMAGE_TAG, "computed_at": computed_at,
                 "time_step": step, "event": p["event"],
                 "warmup": {"start": p["forcing"]["time_start"], "steps": int(p["forcing"].get("steps", p["forcing"]["hours"])) - len(time_utc),
@@ -193,10 +212,15 @@ def gr4h_child(job: dict, out_dir: str, conn) -> None:
                 "forcing": {"source": p.get("forcing_source"), "sha256": p["forcing"]["sha256"], "hours": p["forcing"]["hours"],
                             "steps": p["forcing"].get("steps", p["forcing"]["hours"]), "pet": versions.get("pet")},
                 "parameters": {"version": p["parameters"].get("version") or p.get("post_id"), "source": p["parameters"].get("source"),
-                               "sets": len(p["parameters"]["sets"]), "sha256": param_sha, "transfer": p["parameters"].get("transfer", False)},
+                               "sets": len(p["parameters"]["sets"]), "set_ids": [x.get("id") for x in p["parameters"]["sets"]],
+                               "sha256": param_sha, "transfer": p["parameters"].get("transfer", False),
+                               "release": p["parameters"].get("release"), "variant": p["parameters"].get("variant"),
+                               "file": p["parameters"].get("file"), "publish": bool(p["parameters"].get("publish", True)),
+                               "quality": p["parameters"].get("quality"), "release_note": p["parameters"].get("release_note"),
+                               "calibration": p["parameters"].get("calibration"), "skill": p["parameters"].get("skill")},
                 "initial_state": {**state, "id": _sha(state)},
                 "members": p["members"], "members_n": len(members),
-                "statement": statement(step, model), "limitations": limitations(step)}
+                "statement": statement(step, model), "limitations": limitations(step, release_info(p)["publish"])}
         config_hash = _sha({"forcing": p["forcing"]["sha256"], "parameters": param_sha, "event": p["event"], "members": p["members"], "time_step": step,
                             "basin": {k: p["basin"][k] for k in ("lat", "z_mean_m", "area_km2")}, "pipeline": settings.GR4H_PIPELINE_VERSION})
         meta["config_hash"] = config_hash
@@ -214,10 +238,10 @@ def gr4h_child(job: dict, out_dir: str, conn) -> None:
             label = "GR4J" if step == "1d" else "GR4H"
             products.append({"kind": kind, "name": f"{kind.replace('_', ' ')} · {label} · {p.get('post_id') or p.get('basin_id')}",
                              "file_name": fname, "media_type": "application/json", "processing_version": settings.GR4H_PIPELINE_VERSION,
-                             "crs": "EPSG:4326", "resolution_m": None, "stats": {"runoff_run": p.get("runoff_run_id"), "bytes": len(data)},
+                             "crs": "EPSG:4326", "resolution_m": None, "stats": {"runoff_run": p.get("runoff_run_id"), "bytes": len(data), **release_info(p)},
                              "source_attribution": f"GeoHydroAI Flood Lab {model} {settings.GR4H_PIPELINE_VERSION} — airGR {versions.get('airGR')} (INRAE)",
                              "license": "model output; airGR GPL-2", "content_b64": base64.b64encode(data).decode("ascii")})
-        stats = {"members_n": len(members), "time_step": step, "steps": len(time_utc), "hours": len(time_utc) * _step_s(p) // 3600, "peak": hydro["peak"],
+        stats = {"members_n": len(members), **release_info(p), "time_step": step, "steps": len(time_utc), "hours": len(time_utc) * _step_s(p) // 3600, "peak": hydro["peak"],
                  "stage_table": bool(stage_tbl), "low_confidence_reaches": len(stage_tbl["low_confidence_reaches"]) if stage_tbl else None}
         result = {"kind": "gr4h_run", "stats": stats, "metadata": meta, "config_hash": config_hash, "dropped_products": []}
         (out / "result.json").write_text(json.dumps(result, ensure_ascii=False))

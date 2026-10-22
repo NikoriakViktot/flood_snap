@@ -26,24 +26,73 @@ MODELS = {"1d": "CemaNeigeGR4J", "1h": "CemaNeigeGR4H"}
 ENGINES = {"1d": "airgr-gr4j", "1h": "airgr-gr4h"}
 
 
+RELEASES_FILE = PARAMS_DIR / "releases.json"
+VARIANTS = ("default", "candidate")
+LEGACY_DEPTH_FACTORS = [1.0, 1.25]   # hourly GR4H and inline sets keep the old ensemble default
+
+
 def _params_file(post_id: str, step: str) -> Path:
     # daily sets are <post>.1d.json; the hourly ones keep their first name <post>.json
     return PARAMS_DIR / (f"{post_id}.1d.json" if step == "1d" else f"{post_id}.json")
 
 
-def published_posts(step: str) -> list[str]:
-    files = PARAMS_DIR.glob("*.1d.json") if step == "1d" else (p for p in PARAMS_DIR.glob("*.json") if not p.name.endswith(".1d.json"))
-    return sorted(p.name.split(".")[0] for p in files)
+def releases() -> dict:
+    """The daily parameter releases (params/releases.json): which file each gauge uses and whether it is published."""
+    return json.loads(RELEASES_FILE.read_text())
 
 
-def bundled_params(post_id: str, step: str = "1h") -> dict:
-    p = _params_file(post_id, step)
-    if not p.exists():
-        raise V.Rejected(f"no {MODELS[step]} parameter set is published for gauge {post_id}: available {published_posts(step)}")
-    d = json.loads(p.read_text())
+def release_id(requested: str | None = None) -> str:
+    """The release a daily job uses: the job's params_release, else settings.GR4J_PARAMS_RELEASE, else the manifest default."""
+    m = releases()
+    rid = requested or settings.GR4J_PARAMS_RELEASE or m["default"]
+    if rid not in m["releases"]:
+        raise V.Rejected(f"unknown GR4J parameter release {rid!r}: available {sorted(m['releases'])}")
+    return rid
+
+
+def release(rid: str | None = None) -> dict:
+    rid = release_id(rid)
+    return {"id": rid, **releases()["releases"][rid]}
+
+
+def published_posts(step: str, release_name: str | None = None) -> list[str]:
+    """Gauges with bundled parameters: daily = the posts of the active (or named) release, publishable or not."""
+    if step == "1d":
+        return sorted(release(release_name)["posts"])
+    return sorted(p.name.split(".")[0] for p in PARAMS_DIR.glob("*.json")
+                  if not p.name.endswith(".1d.json") and p.name.split(".")[0].isdigit())
+
+
+def _load(path: Path, post_id: str, step: str) -> dict:
+    d = json.loads(path.read_text())
     if d.get("model") not in (None, MODELS[step]):
         raise V.Rejected(f"the parameter file of gauge {post_id} is for {d.get('model')}, not {MODELS[step]}")
+    if d.get("post_id") not in (None, str(post_id)):
+        raise V.Rejected(f"the parameter file {path.name} is for gauge {d.get('post_id')}, not {post_id}")
     return d
+
+
+def bundled_params(post_id: str, step: str = "1h", release_name: str | None = None, variant: str = "default") -> dict:
+    """The published parameter sets of a gauge. Daily: from the release (its file, or its non-default `candidate` file),
+    stamped with the release, variant, publish flag and quality so they travel into the run's metadata."""
+    if step != "1d":
+        p = _params_file(post_id, step)
+        if not p.exists():
+            raise V.Rejected(f"no {MODELS[step]} parameter set is published for gauge {post_id}: available {published_posts(step)}")
+        return _load(p, post_id, step)
+    if variant not in VARIANTS:
+        raise V.Rejected(f"param_variant must be one of {list(VARIANTS)}")
+    rel = release(release_name)
+    entry = rel["posts"].get(str(post_id))
+    if entry is None:
+        raise V.Rejected(f"no {MODELS[step]} parameter set is published for gauge {post_id} in release {rel['id']}: "
+                         f"available {sorted(rel['posts'])}")
+    rel_file = entry["file"] if variant == "default" else entry.get("candidate")
+    if not rel_file:
+        raise V.Rejected(f"gauge {post_id} has no candidate parameter set in release {rel['id']}")
+    d = _load(PARAMS_DIR / rel_file, post_id, step)
+    return {**d, "release": rel["id"], "variant": variant, "file": rel_file, "publish": bool(entry.get("publish", True)),
+            "quality": entry.get("quality"), "release_note": entry.get("note")}
 
 
 def prepare_gr4h(params: dict) -> dict:
@@ -91,6 +140,8 @@ def prepare_gr4h(params: dict) -> dict:
             raise V.Rejected(f"basin.{k} is required")
     if len(basin["hypso_m"]) != 101:
         raise V.Rejected("basin.hypso_m must hold 101 elevation quantiles (0 … 100 %)")
+    # daily: the parameter release (params/releases.json) gives the bundled sets and the ensemble's depth factors
+    rel = release(params.get("params_release")) if step == "1d" else None
     if params.get("parameters") is not None:
         pset = params["parameters"]
         if not isinstance(pset, dict) or not pset.get("sets"):
@@ -98,7 +149,7 @@ def prepare_gr4h(params: dict) -> dict:
     else:
         if not params.get("post_id"):
             raise V.Rejected("post_id (a gauge with published parameters) or inline parameters are required")
-        pset = bundled_params(str(params["post_id"]), step)
+        pset = bundled_params(str(params["post_id"]), step, rel["id"] if rel else None, params.get("param_variant") or "default")
     for s in pset["sets"]:
         for k in ("id", "X1", "X2", "X3", "X4", "CNX1", "CNX2"):
             if k not in s:
@@ -108,11 +159,12 @@ def prepare_gr4h(params: dict) -> dict:
     if mode not in ("reference", "ensemble"):
         raise V.Rejected("members.mode must be reference or ensemble")
     if mode == "ensemble":
-        # daily: one value per day, so there is no within-day timing to sample — the ensemble is parameter sets × depths
+        # daily: one value per day, so there is no within-day timing to sample — the ensemble is parameter sets × depths;
+        # the release says which depths (gr4j-era5land-2026.10: [1.0], the sets only; the ClimUAd release: [1.0, 1.25])
         default_alphas = [] if step == "1d" else [1, 4, 20]
         members = {"mode": "ensemble", "alphas": members.get("alphas", default_alphas) if step == "1h" else [],
                    "n_per_alpha": int(members.get("n_per_alpha", 4)),
-                   "depth_factors": members.get("depth_factors", [1.0, 1.25]), "seed": int(members.get("seed", 20261017)),
+                   "depth_factors": members.get("depth_factors", list(rel["depth_factors"]) if rel else LEGACY_DEPTH_FACTORS), "seed": int(members.get("seed", 20261017)),
                    "param_sets": members.get("param_sets", "behavioural")}
         n_sets = len(pset["sets"]) if members["param_sets"] == "behavioural" else 1
         total = n_sets * (1 + len(members["alphas"]) * members["n_per_alpha"]) * len(members["depth_factors"])
@@ -128,4 +180,5 @@ def prepare_gr4h(params: dict) -> dict:
     return {**params, "time_step": step, "model": MODELS[step], "engine": ENGINES[step],
             "forcing": {**f, "time_start": t0.isoformat().replace("+00:00", "Z"), "steps": n, "hours": n * step_h, "sha256": digest},
             "event": {"start": run_start.isoformat().replace("+00:00", "Z"), "end": run_end.isoformat().replace("+00:00", "Z")},
-            "parameters": pset, "members": members}
+            "parameters": pset, "members": members, "params_release": rel["id"] if rel else None,
+            "model_version": pset.get("version") or ("inline" if params.get("parameters") is not None else None)}

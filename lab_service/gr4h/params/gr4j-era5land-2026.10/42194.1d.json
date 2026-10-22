@@ -1,0 +1,183 @@
+{
+ "schema": "geohydroai.gr4h_params/v1",
+ "model": "CemaNeigeGR4J",
+ "time_step": "1d",
+ "post_id": "42194",
+ "name": "Білий Черемош — Яблуниця",
+ "version": "gr4j-era5land-2026.10",
+ "source_version": "prut-gr4j-era5land-2026-10-22",
+ "source": "geohydroai-storms experiments/era5land-recal/calibrate.R: airGR 1.7.9 Calibration_Michel, forcing ERA5-Land (CDS 0.1°, basin area-weighted, 20:00→20:00 Kyiv day), T lapsed to the basin mean FABDEM elevation, PET Oudin, CemaNeige 5 layers; Q over the official area; geohydroai-storms PR #8 @ 2e88eb8 results/proposed_params/42194.1d.json",
+ "calibration": {
+  "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor",
+  "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+  "engine": "airGR 1.7.9 Calibration_Michel, CemaNeige-GR4J, 5 elevation layers, PET Oudin",
+  "periods": {
+   "split_sample": [
+    "1981-2001",
+    "2002-2023"
+   ],
+   "reference": "1981-2023",
+   "warm_up": [
+    "1979-12…1980-12",
+    "2001"
+   ]
+  },
+  "qc_mask": null,
+  "sets": "reference (1981-2023) + C_S1/C_S2 split-sample + MC1-3 behavioural (C ≥ C_ref − 0.03); sets at airGR bounds dropped"
+ },
+ "forcing_contract": {
+  "precip": "ERA5-Land basin mean, no factor (ICON-EU adjusted to it in operation)",
+  "day": "20:00 Kyiv → 20:00 Kyiv",
+  "temperature": "ERA5-Land t2m lapsed −6.5 K/km to z_mean",
+  "area_km2": 552.0
+ },
+ "skill": {
+  "note": "on ERA5-Land forcing (not the operational chain); split-sample validation = mean of both directions; 'current' = the prut-network-gr4j-climuad-2026-10-16 reference set run on the same ERA5-Land forcing",
+  "validation": {
+   "n_directions": 2,
+   "kge2": 0.6,
+   "nse": 0.29,
+   "nse_log": 0.5,
+   "kge2_inv": 0.71,
+   "lowflow_bias": 0.18,
+   "q7min_ratio_med": 0.94,
+   "peak_ratio_med": 0.93
+  },
+  "current_same_forcing": {
+   "kge2": 0.46,
+   "nse": 0.38,
+   "nse_log": 0.58,
+   "kge2_inv": 0.72,
+   "lowflow_bias": -0.01,
+   "q7min_ratio_med": 0.8,
+   "peak_ratio_med": 0.34
+  },
+  "2021_2023": {
+   "new": {
+    "kge2": 0.73,
+    "kge2_inv": 0.83,
+    "bias": 0.03,
+    "lowflow_bias": 0.16,
+    "q7min_ratio_med": 0.96
+   },
+   "current": {
+    "kge2": 0.55,
+    "kge2_inv": 0.72,
+    "bias": -0.27,
+    "lowflow_bias": -0.01,
+    "q7min_ratio_med": 1.01
+   }
+  }
+ },
+ "note": "set 'reference' = calibrated on the whole 1981-2023 record; C_S1/C_S2 = split-sample calibrations (independently validated); MC1-3 = behavioural sets around the reference (criterion within 0.03 on 1981-2023). Ensemble = these sets × precip 1.0 only. Model result, not an observation.",
+ "sets": [
+  {
+   "id": "reference",
+   "X1": 804.3223,
+   "X2": -1.7583,
+   "X3": 36.2341,
+   "X4": 1.027,
+   "CNX1": 0.0035,
+   "CNX2": 6.5645,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2023",
+    "kge2_full": 0.671,
+    "nse_log_full": 0.583,
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor"
+   }
+  },
+  {
+   "id": "C_S1",
+   "X1": 634.1222,
+   "X2": -1.0378,
+   "X3": 27.1331,
+   "X4": 1.1342,
+   "CNX1": 0.0056,
+   "CNX2": 5.8039,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2001",
+    "kge2_full": 0.682,
+    "nse_log_full": 0.519,
+    "kge2_val": 0.608,
+    "nse_log_val": 0.336,
+    "validation": "2002-2023",
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor"
+   }
+  },
+  {
+   "id": "C_S2",
+   "X1": 1107.6545,
+   "X2": -2.4015,
+   "X3": 36.5982,
+   "X4": 1.0953,
+   "CNX1": 0.004,
+   "CNX2": 8.6857,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "2002-2023",
+    "kge2_full": 0.613,
+    "nse_log_full": 0.624,
+    "kge2_val": 0.589,
+    "nse_log_val": 0.672,
+    "validation": "1981-2001",
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor"
+   }
+  },
+  {
+   "id": "MC1",
+   "X1": 870.1318,
+   "X2": -2.0722,
+   "X3": 29.7982,
+   "X4": 1.9307,
+   "CNX1": 0.0523,
+   "CNX2": 12.8637,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2023 (Monte-Carlo, behavioural)",
+    "kge2_full": 0.624,
+    "nse_log_full": 0.563,
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor"
+   }
+  },
+  {
+   "id": "MC2",
+   "X1": 802.3407,
+   "X2": -4.4288,
+   "X3": 91.7143,
+   "X4": 0.571,
+   "CNX1": 0.0,
+   "CNX2": 7.4449,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2023 (Monte-Carlo, behavioural)",
+    "kge2_full": 0.615,
+    "nse_log_full": 0.637,
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor"
+   }
+  },
+  {
+   "id": "MC3",
+   "X1": 1020.4177,
+   "X2": -0.8809,
+   "X3": 14.6179,
+   "X4": 1.2661,
+   "CNX1": 0.0,
+   "CNX2": 2.9963,
+   "calibration": {
+    "scheme": "0.5 KGE'(Q) + 0.5 KGE'(1/Q)",
+    "period": "1981-2023 (Monte-Carlo, behavioural)",
+    "kge2_full": 0.636,
+    "nse_log_full": 0.495,
+    "objective": "0.5·KGE′(Q) + 0.5·KGE′(1/(Q+ε)), ε = mean(Q)/100",
+    "forcing": "ERA5-Land daily_climuad, basin mean (area-weighted 0.1° cells), 20:00→20:00 Kyiv day; T lapsed −6.5 K/km to z_mean; no precipitation factor"
+   }
+  }
+ ]
+}

@@ -47,7 +47,26 @@
             "string",
             "null"
           ],
-          "description": "gauge whose published parameter sets are used (lab_service/gr4h/params/<post_id>.json)"
+          "description": "gauge whose published parameter sets are used (lab_service/gr4h/params: daily sets through the release in params/releases.json, hourly <post_id>.json)"
+        },
+        "params_release": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "daily only: the parameter release to use (params/releases.json), e.g. gr4j-era5land-2026.10; default = the worker's GR4J_PARAMS_RELEASE, else the manifest default (the release in operation)"
+        },
+        "param_variant": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "default",
+            "candidate",
+            null
+          ],
+          "description": "daily only: 'candidate' runs a gauge's non-default candidate sets of the release (e.g. the ERA5-Land sets of the control gauges 42198/42202), for comparison"
         },
         "basin": {
           "type": "object",
