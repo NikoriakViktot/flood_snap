@@ -269,6 +269,7 @@
                          "issued_at": {"type": ["string", "null"], "description": "the forecast's issue time: an observation after it is refused (no look-ahead)"},
                          "source": {"type": ["string", "null"]}, "use": {"enum": ["shadow", "primary"]},
                          "max_store_change_frac": {"type": "number", "exclusiveMinimum": 0, "maximum": 2},
+                         "persistence_weights": {"type": ["array", "null"], "items": {"type": "number", "minimum": 0, "maximum": 1}, "maxItems": 10, "description": "lead 1, 2, …: Q = w·Q_obs + (1 − w)·Q_updated after the update day"},
                          "provenance": {"type": ["object", "null"], "description": "level, rating curve, bulletin date…: carried into the products as is"}}
         },
         "hydrotable": {

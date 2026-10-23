@@ -136,8 +136,13 @@ def state_update(su: dict | None, step: str, basin: dict, run_start: datetime, r
     frac = float(su.get("max_store_change_frac", MAX_STORE_CHANGE_FRAC))
     if not 0 < frac <= 2:
         raise V.Rejected("state_update.max_store_change_frac must be in (0, 2]")
+    w = su.get("persistence_weights")
+    if w is not None:
+        if not (isinstance(w, list) and 1 <= len(w) <= 10 and all(isinstance(x, (int, float)) and 0 <= x <= 1 for x in w)):
+            raise V.Rejected("state_update.persistence_weights must be 1…10 numbers in [0, 1] (lead 1, 2, …)")
+        w = [float(x) for x in w]
     area = float(basin["area_km2"])
-    return {"day": day.date().isoformat(), "q_m3s": round(q, 4), "q_mm": round(q * 86.4 / area, 6),
+    return {"day": day.date().isoformat(), "persistence_weights": w, "q_m3s": round(q, 4), "q_mm": round(q * 86.4 / area, 6),
             "observed_at": observed_at.isoformat().replace("+00:00", "Z"),
             "issued_at": issued_at.isoformat().replace("+00:00", "Z") if issued_at else None,
             "source": str(su.get("source") or "")[:200], "use": use, "max_store_change_frac": frac,
