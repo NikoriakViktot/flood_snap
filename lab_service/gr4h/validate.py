@@ -95,6 +95,55 @@ def bundled_params(post_id: str, step: str = "1h", release_name: str | None = No
             "quality": entry.get("quality"), "release_note": entry.get("note")}
 
 
+STATE_UPDATE_USES = ("shadow", "primary")
+MAX_STORE_CHANGE_FRAC = 1.0   # an update may move the routing store by at most this × X3 (one full store)
+
+
+def state_update(su: dict | None, step: str, basin: dict, run_start: datetime, run_end: datetime, t0: datetime) -> dict | None:
+    """The morning state update from an observed discharge (owner's plan of 2026-10-22, PR 3), normalised:
+    {"day", "q_m3s", "q_mm", "observed_at", "issued_at", "source", "use", "max_store_change_frac", "provenance"}.
+
+    `day` is the model day the observation stands for (the 08:00 Kyiv term of the bulletin of date D lies in the middle
+    of the hydrological day D, and inside the UTC day D); it must lie in the event window. No look-ahead: an observation
+    taken after `issued_at` (the forecast's issue time) is refused. `use`: "shadow" (default) — the run's main series stay
+    open loop and the updated ones ride along for comparison; "primary" — the updated series become the main ones.
+    Daily runs only."""
+    if su is None:
+        return None
+    if step != "1d":
+        raise V.Rejected("state_update is for daily (1d) runs only")
+    if not isinstance(su, dict):
+        raise V.Rejected("state_update must be an object")
+    try:
+        q = float(su.get("q_m3s"))
+    except (TypeError, ValueError):
+        raise V.Rejected("state_update.q_m3s must be a number") from None
+    if not (q > 0 and q < 1e6):
+        raise V.Rejected("state_update.q_m3s must be a positive discharge")
+    try:
+        day = datetime.fromisoformat(str(su.get("day"))[:10]).replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise V.Rejected("state_update.day must be a date (YYYY-MM-DD)") from None
+    if not (run_start <= day <= run_end) or day <= t0:
+        raise V.Rejected("state_update.day must lie inside the event window")
+    observed_at = _iso(su.get("observed_at"), "state_update.observed_at")
+    issued_at = _iso(su["issued_at"], "state_update.issued_at") if su.get("issued_at") else None
+    if issued_at is not None and observed_at > issued_at:
+        raise V.Rejected("state_update.observed_at is after the issue time (no look-ahead)")
+    use = su.get("use") or "shadow"
+    if use not in STATE_UPDATE_USES:
+        raise V.Rejected(f"state_update.use must be one of {list(STATE_UPDATE_USES)}")
+    frac = float(su.get("max_store_change_frac", MAX_STORE_CHANGE_FRAC))
+    if not 0 < frac <= 2:
+        raise V.Rejected("state_update.max_store_change_frac must be in (0, 2]")
+    area = float(basin["area_km2"])
+    return {"day": day.date().isoformat(), "q_m3s": round(q, 4), "q_mm": round(q * 86.4 / area, 6),
+            "observed_at": observed_at.isoformat().replace("+00:00", "Z"),
+            "issued_at": issued_at.isoformat().replace("+00:00", "Z") if issued_at else None,
+            "source": str(su.get("source") or "")[:200], "use": use, "max_store_change_frac": frac,
+            "provenance": su.get("provenance") if isinstance(su.get("provenance"), dict) else None}
+
+
 def prepare_gr4h(params: dict) -> dict:
     """The request as stored with the job: times normalised, the time step and the parameter sets resolved (bundled per
     gauge and step, or inline), the forcing checked (one value per step over whole UTC days, ≥ 1 year of warm-up) and
@@ -170,6 +219,7 @@ def prepare_gr4h(params: dict) -> dict:
         total = n_sets * (1 + len(members["alphas"]) * members["n_per_alpha"]) * len(members["depth_factors"])
         if total > settings.GR4H_MAX_MEMBERS:
             raise V.Rejected(f"{total} ensemble members, above the limit {settings.GR4H_MAX_MEMBERS}")
+    su = state_update(params.get("state_update"), step, basin, run_start, run_end, t0)
     ht = params.get("hydrotable")
     if ht is not None and not (isinstance(ht, dict) and isinstance(ht.get("reaches"), list) and isinstance(ht.get("stages_m"), list)):
         raise V.Rejected("hydrotable must be a geohydroai.hydrotable/v1 object")
@@ -180,5 +230,5 @@ def prepare_gr4h(params: dict) -> dict:
     return {**params, "time_step": step, "model": MODELS[step], "engine": ENGINES[step],
             "forcing": {**f, "time_start": t0.isoformat().replace("+00:00", "Z"), "steps": n, "hours": n * step_h, "sha256": digest},
             "event": {"start": run_start.isoformat().replace("+00:00", "Z"), "end": run_end.isoformat().replace("+00:00", "Z")},
-            "parameters": pset, "members": members, "params_release": rel["id"] if rel else None,
+            "parameters": pset, "members": members, "params_release": rel["id"] if rel else None, "state_update": su,
             "model_version": pset.get("version") or ("inline" if params.get("parameters") is not None else None)}
