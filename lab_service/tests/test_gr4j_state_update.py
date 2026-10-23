@@ -167,3 +167,18 @@ def test_real_update_refuses_an_implausible_store_change(tmp_path):
     for m in b["members"]:
         if m["status"] == "rejected":
             assert m["q_updated_m3s"] == m["q_open_loop_m3s"]
+
+
+def test_persistence_blend_after_the_update_day():
+    from lab_service.gr4h.runner import blend_with_persistence
+    p = GV.prepare_gr4h(_dp(state_update={**SU, "persistence_weights": [0.6, 0.3, 0.25]}))
+    times = [f"2020-01-{d:02d}T00:00:00Z" for d in range(20, 30)]
+    q = np.full((2, len(times)), 20.0)
+    out, w = blend_with_persistence(p, times, q)
+    i = times.index("2020-01-25T00:00:00Z")
+    assert w == [0.6, 0.3, 0.25] and out[0, i] == 20.0 and out[0, i - 1] == 20.0          # the update day itself unchanged
+    assert out[0, i + 1] == pytest.approx(0.6 * 12.0 + 0.4 * 20.0) and out[1, i + 2] == pytest.approx(0.3 * 12.0 + 0.7 * 20.0)
+    assert out[0, i + 4] == 20.0                                                            # beyond the weights: the model
+    assert blend_with_persistence(GV.prepare_gr4h(_dp(state_update=SU)), times, q)[1] is None
+    with pytest.raises(V.Rejected, match="persistence_weights"):
+        GV.prepare_gr4h(_dp(state_update={**SU, "persistence_weights": [1.5]}))

@@ -152,6 +152,28 @@ def read_state_update(wd: Path, area_km2: float) -> list[dict] | None:
     return out
 
 
+def blend_with_persistence(p: dict, time_utc: list[str], q_up: np.ndarray) -> tuple[np.ndarray, list[float] | None]:
+    """Lead L days after the update day: Q = w_L · Q_obs(day) + (1 − w_L) · Q_updated, per member (w = 0 beyond the list).
+    The weights come from the 2021-2023 hindcast (fitted on 2021-2022, tested on 2023: the blend beat persistence at
+    +1 d on all seven published gauges, the store update alone on five). Days up to the update day are unchanged."""
+    su = p["state_update"]
+    w = su.get("persistence_weights")
+    if not w:
+        return q_up, None
+    k = p["basin"]["area_km2"] * 1e6 / 86400 / 1000
+    q_obs = su["q_mm"] * k                       # m³/s, the same conversion as the series
+    day = su["day"]
+    i0 = next((i for i, t in enumerate(time_utc) if t[:10] == day), None)
+    if i0 is None:
+        return q_up, None
+    out = q_up.copy()
+    for lead, wl in enumerate(w, start=1):
+        i = i0 + lead
+        if i < out.shape[1]:
+            out[:, i] = wl * q_obs + (1 - wl) * q_up[:, i]
+    return out, w
+
+
 def state_update_block(p: dict, q_ol: np.ndarray, q_up: np.ndarray, rows: list[dict]) -> dict:
     """What the update did, with the series of BOTH variants (percentiles + reference), so the shadow comparison and the
     rollback need no second run. `primary` says which variant the hydrograph's main series are."""
@@ -168,6 +190,7 @@ def state_update_block(p: dict, q_ol: np.ndarray, q_up: np.ndarray, rows: list[d
             "status_counts": st, "applied_members": len(applied),
             "dR_mm_median": round(float(np.median([r["dR_mm"] for r in applied])), 3) if applied else None,
             "members": rows, "open_loop": _series(q_ol), "updated": _series(q_up),
+            "persistence_weights": su.get("persistence_weights"),
             "limitations": ["the bulletin gives the 08:00 instantaneous discharge (from the level through the current rating "
                             "curve); the model day is a daily mean: the update treats one as the other",
                             "only the routing store is adjusted: snow and soil moisture errors are not corrected"]}
@@ -246,6 +269,7 @@ def gr4h_child(job: dict, out_dir: str, conn) -> None:
         if p.get("state_update") and (wd / "qsim_updated.csv").exists():
             _, _, q_up = _read_qsim(wd, p["basin"]["area_km2"], _step_s(p), "qsim_updated.csv")
             su_rows = read_state_update(wd, p["basin"]["area_km2"])
+            q_up, _ = blend_with_persistence(p, time_utc, q_up)
             su_block = state_update_block(p, q, q_up, su_rows or [])
             if su_block["primary"] == "updated":
                 q = q_up                       # the forecast series, stage table and peaks follow the updated run
