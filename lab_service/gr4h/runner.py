@@ -103,11 +103,13 @@ def _write_inputs(p: dict, wd: Path) -> None:
            "warmup_end": datetime.fromtimestamp(warm_end, tz=timezone.utc).strftime("%Y-%m-%d %H:%M"),
            "run_start": ev["start"].replace("Z", "").replace("T", " "), "run_end": ev["end"].replace("Z", "").replace("T", " "),
            "members": p["members"], "time_step": p.get("time_step", "1h")}
+    if p.get("state_update"):
+        cfg["state_update"] = p["state_update"]
     (wd / "config.json").write_text(json.dumps(cfg))
 
 
-def _read_qsim(wd: Path, area_km2: float, step_s: int = 3600) -> tuple[list[str], list[str], np.ndarray]:
-    with (wd / "qsim.csv").open() as fh:
+def _read_qsim(wd: Path, area_km2: float, step_s: int = 3600, name: str = "qsim.csv") -> tuple[list[str], list[str], np.ndarray]:
+    with (wd / name).open() as fh:
         rows = list(csv.reader(fh))
     head, body = rows[0], rows[1:]
     time_utc = [r[0] for r in body]
@@ -126,7 +128,52 @@ def _members(wd: Path) -> list[dict]:
     return out
 
 
-def hydrograph_product(p: dict, time_utc: list[str], members: list[dict], q: np.ndarray) -> dict:
+def _series(q: np.ndarray) -> dict:
+    from lab_service.gr4h.stages import percentiles
+    pct = percentiles(q)
+    return {"reference": [round(float(x), 3) for x in q[0]], **{k: [round(float(x), 3) for x in v] for k, v in pct.items()}}
+
+
+def read_state_update(wd: Path, area_km2: float) -> list[dict] | None:
+    """Per member: the routing store before / after the update (mm), ΔR as mm and m³ over the basin, the observed and the
+    simulated discharge of the update day (m³/s), and the status (matched, bounded_low/high, rejected)."""
+    f = wd / "state_update.csv"
+    if not f.exists():
+        return None
+    k = area_km2 * 1e6 / 86400 / 1000          # mm/day → m³/s
+    out = []
+    with f.open() as fh:
+        for r in csv.DictReader(fh):
+            dr = float(r["dR_mm"])
+            out.append({"member": r["member"], "status": r["status"], "R_open_loop_mm": float(r["R_open_loop_mm"]),
+                        "R_updated_mm": float(r["R_updated_mm"]), "dR_mm": dr, "dR_m3": round(dr / 1000 * area_km2 * 1e6),
+                        "q_obs_m3s": round(float(r["q_obs_mm"]) * k, 3), "q_open_loop_m3s": round(float(r["q_open_loop_mm"]) * k, 3),
+                        "q_updated_m3s": round(float(r["q_updated_mm"]) * k, 3)})
+    return out
+
+
+def state_update_block(p: dict, q_ol: np.ndarray, q_up: np.ndarray, rows: list[dict]) -> dict:
+    """What the update did, with the series of BOTH variants (percentiles + reference), so the shadow comparison and the
+    rollback need no second run. `primary` says which variant the hydrograph's main series are."""
+    su = p["state_update"]
+    st: dict[str, int] = {}
+    for r in rows:
+        st[r["status"]] = st.get(r["status"], 0) + 1
+    applied = [r for r in rows if r["status"] != "rejected"]
+    return {"schema": "geohydroai.state_update/v1", "method": "routing store R at the start of the day, bisection so that "
+            "the simulated daily Q of the day equals the observed Q (snow and production stores unchanged)",
+            "primary": "updated" if su["use"] == "primary" else "open_loop", "use": su["use"], "day": su["day"],
+            "q_obs_m3s": su["q_m3s"], "observed_at": su["observed_at"], "issued_at": su.get("issued_at"), "source": su.get("source"),
+            "provenance": su.get("provenance"), "max_store_change_frac": su["max_store_change_frac"],
+            "status_counts": st, "applied_members": len(applied),
+            "dR_mm_median": round(float(np.median([r["dR_mm"] for r in applied])), 3) if applied else None,
+            "members": rows, "open_loop": _series(q_ol), "updated": _series(q_up),
+            "limitations": ["the bulletin gives the 08:00 instantaneous discharge (from the level through the current rating "
+                            "curve); the model day is a daily mean: the update treats one as the other",
+                            "only the routing store is adjusted: snow and soil moisture errors are not corrected"]}
+
+
+def hydrograph_product(p: dict, time_utc: list[str], members: list[dict], q: np.ndarray, su_block: dict | None = None) -> dict:
     from lab_service.gr4h.stages import percentiles
     pct = percentiles(q)
     ref = q[0]
@@ -146,6 +193,8 @@ def hydrograph_product(p: dict, time_utc: list[str], members: list[dict], q: np.
                     **{f"{k}_m3s": round(float(v.max()), 3) for k, v in pct.items()}, **{f"{k}_time": time_utc[peak_i[k]] for k in pct},
                     "volume_reference_mm": round(float(ref.sum() * step_s / (p["basin"]["area_km2"] * 1e6) * 1000), 2)},
            "statement": statement(step, model), "limitations": limitations(step, release_info(p)["publish"])}
+    if su_block is not None:
+        out["state_update"] = su_block
     if full:
         out["q_by_member"] = [[round(float(x), 2) for x in row] for row in q]
     else:
@@ -193,7 +242,14 @@ def gr4h_child(job: dict, out_dir: str, conn) -> None:
         members = _members(wd)
         versions = json.loads((wd / "versions.json").read_text())
         state = json.loads((wd / "state.json").read_text())
-        hydro = hydrograph_product(p, time_utc, members, q)
+        su_rows, su_block = None, None
+        if p.get("state_update") and (wd / "qsim_updated.csv").exists():
+            _, _, q_up = _read_qsim(wd, p["basin"]["area_km2"], _step_s(p), "qsim_updated.csv")
+            su_rows = read_state_update(wd, p["basin"]["area_km2"])
+            su_block = state_update_block(p, q, q_up, su_rows or [])
+            if su_block["primary"] == "updated":
+                q = q_up                       # the forecast series, stage table and peaks follow the updated run
+        hydro = hydrograph_product(p, time_utc, members, q, su_block)
         products_obj = {"hydrograph": (hydro, "hydrograph.json")}
         stage_tbl = None
         if hydrotable is not None:
@@ -220,8 +276,10 @@ def gr4h_child(job: dict, out_dir: str, conn) -> None:
                                "calibration": p["parameters"].get("calibration"), "skill": p["parameters"].get("skill")},
                 "initial_state": {**state, "id": _sha(state)},
                 "members": p["members"], "members_n": len(members),
+                "state_update": {k: v for k, v in su_block.items() if k not in ("open_loop", "updated", "members")} if su_block else None,
                 "statement": statement(step, model), "limitations": limitations(step, release_info(p)["publish"])}
         config_hash = _sha({"forcing": p["forcing"]["sha256"], "parameters": param_sha, "event": p["event"], "members": p["members"], "time_step": step,
+                            **({"state_update": p["state_update"]} if p.get("state_update") else {}),
                             "basin": {k: p["basin"][k] for k in ("lat", "z_mean_m", "area_km2")}, "pipeline": settings.GR4H_PIPELINE_VERSION})
         meta["config_hash"] = config_hash
         products_obj["model_metadata"] = (meta, "model_metadata.json")
@@ -241,7 +299,7 @@ def gr4h_child(job: dict, out_dir: str, conn) -> None:
                              "crs": "EPSG:4326", "resolution_m": None, "stats": {"runoff_run": p.get("runoff_run_id"), "bytes": len(data), **release_info(p)},
                              "source_attribution": f"GeoHydroAI Flood Lab {model} {settings.GR4H_PIPELINE_VERSION} — airGR {versions.get('airGR')} (INRAE)",
                              "license": "model output; airGR GPL-2", "content_b64": base64.b64encode(data).decode("ascii")})
-        stats = {"members_n": len(members), **release_info(p), "time_step": step, "steps": len(time_utc), "hours": len(time_utc) * _step_s(p) // 3600, "peak": hydro["peak"],
+        stats = {"members_n": len(members), **release_info(p), "state_update": su_block["primary"] if su_block else None, "time_step": step, "steps": len(time_utc), "hours": len(time_utc) * _step_s(p) // 3600, "peak": hydro["peak"],
                  "stage_table": bool(stage_tbl), "low_confidence_reaches": len(stage_tbl["low_confidence_reaches"]) if stage_tbl else None}
         result = {"kind": "gr4h_run", "stats": stats, "metadata": meta, "config_hash": config_hash, "dropped_products": []}
         (out / "result.json").write_text(json.dumps(result, ensure_ascii=False))

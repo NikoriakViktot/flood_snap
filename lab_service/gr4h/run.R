@@ -11,6 +11,14 @@
 #        state.json (CemaNeige-GR4H states at warmup_end for the reference set: the initial state of a next run),
 #        versions.json. Rain is redistributed only inside the run window and only within a block (the 12-h or 24-h
 #        total of a block is conserved exactly), as in geohydroai-storms mode A.
+# Optional config "state_update" (daily only; lab_service.gr4h.validate.state_update): {"day", "q_mm",
+#        "max_store_change_frac", …}. For every member the routing store R at the START of `day` is set by bisection on
+#        [0, max(X3, R)] so that the simulated Q of `day` equals the observed one (geohydroai-storms era5land-recal
+#        state_update.R); the snow pack and the production store are left alone. Water-balance check: the store change
+#        ΔR (mm over the basin) is reported, and a member whose |ΔR| exceeds max_store_change_frac × X3 keeps its open-loop
+#        series ("rejected"). Writes qsim_updated.csv (the run window: open loop before `day`, updated from `day` on) and
+#        state_update.csv (member, R_open_loop_mm, R_updated_mm, dR_mm, q_obs_mm, q_open_loop_mm, q_updated_mm, status).
+#        qsim.csv stays the open-loop run.
 suppressMessages(library(airGR))
 options(warn = -1)
 args <- commandArgs(TRUE)
@@ -66,7 +74,46 @@ if (identical(m$mode, "ensemble") && !daily) {
 }
 depths <- if (identical(m$mode, "ensemble")) m$depth_factors else 1.0
 sets <- if (identical(m$mode, "ensemble") && identical(m$param_sets, "behavioural")) seq_len(nrow(ps)) else 1L
-Q <- list(); rows <- list(); n <- 0
+su <- cfg$state_update
+upd <- daily && !is.null(su)
+if (upd) {
+  ia <- which(format(dates, "%Y-%m-%d") == su$day)
+  stopifnot(length(ia) == 1, ia %in% run, ia > warm[1])
+  pre <- seq(warm[1], ia - 1)
+  tail_i <- seq(ia, max(run))
+}
+# one model day (or a stretch) from given states with R replaced
+from_state <- function(IMm, par, S, r, idx) {
+  S$Store$Rout <- r
+  RO <- CreateRunOptions(FUN_MOD = FUN, InputsModel = IMm, IndPeriod_WarmUp = 0L, IndPeriod_Run = idx, IniStates = S,
+                         verbose = FALSE, warnings = FALSE)
+  FUN(InputsModel = IMm, RunOptions = RO, Param = par)$Qsim
+}
+update_member <- function(IMm, par, q_ol) {
+  RO <- CreateRunOptions(FUN_MOD = FUN, InputsModel = IMm, IndPeriod_WarmUp = 0L, IndPeriod_Run = pre, Outputs_Sim = "StateEnd",
+                         verbose = FALSE, warnings = FALSE)
+  S <- FUN(InputsModel = IMm, RunOptions = RO, Param = par)$StateEnd
+  r_ol <- S$Store$Rout
+  f <- function(r) from_state(IMm, par, S, r, ia) - su$q_mm
+  # R in [0, max(X3, R)]: with X2 < 0 the exchange X2·(R/X3)^3.5 makes Q fall again for R ≫ X3 (not monotonic). No root
+  # inside: the bound (R = 0 when even an empty store gives too much — the direct flow alone is above the observation).
+  lo <- 0; hi <- max(par[3], r_ol)
+  if (f(lo) > 0) { r_new <- lo; status <- "bounded_low" } else if (f(hi) < 0) { r_new <- hi; status <- "bounded_high" } else {
+    for (k in 1:40) { mid <- (lo + hi) / 2; if (f(mid) > 0) hi <- mid else lo <- mid }
+    r_new <- (lo + hi) / 2; status <- "matched"
+  }
+  dR <- r_new - r_ol
+  q_up <- q_ol
+  if (abs(dR) > su$max_store_change_frac * par[3]) {
+    status <- "rejected"                     # implausible store change: the member keeps its open-loop series
+  } else {
+    q_up[run >= ia] <- from_state(IMm, par, S, r_new, tail_i)
+  }
+  list(q = q_up, row = data.frame(R_open_loop_mm = round(r_ol, 4), R_updated_mm = round(r_new, 4), dR_mm = round(dR, 4),
+                                  q_obs_mm = su$q_mm, q_open_loop_mm = round(q_ol[run == ia], 5),
+                                  q_updated_mm = round(q_up[run == ia], 5), status = status))
+}
+Q <- list(); QU <- list(); urows <- list(); rows <- list(); n <- 0
 for (d in depths) for (hy in hyetos) {
   P <- f$P_mm; P[run] <- hy$P * d
   IMm <- mk(P)
@@ -77,12 +124,23 @@ for (d in depths) for (hy in hyetos) {
     id <- sprintf("m%04d", n - 1)
     Q[[id]] <- round(OM$Qsim, 5)
     rows[[n]] <- data.frame(member = id, set = ps$id[s], hyeto = hy$id, alpha = hy$alpha, depth = d)
+    if (upd) {
+      u <- update_member(IMm, param(ps[s, ]), OM$Qsim)
+      QU[[id]] <- round(u$q, 5)
+      urows[[n]] <- cbind(data.frame(member = id), u$row)
+    }
   }
 }
 out <- data.frame(time_utc = format(dates[run], "%Y-%m-%dT%H:%M:%SZ"))
 for (id in names(Q)) out[[id]] <- Q[[id]]
 write.csv(out, file.path(wd, "qsim.csv"), row.names = FALSE)
 write.csv(do.call(rbind, rows), file.path(wd, "members.csv"), row.names = FALSE)
+if (upd) {
+  ou <- data.frame(time_utc = format(dates[run], "%Y-%m-%dT%H:%M:%SZ"))
+  for (id in names(QU)) ou[[id]] <- QU[[id]]
+  write.csv(ou, file.path(wd, "qsim_updated.csv"), row.names = FALSE)
+  write.csv(do.call(rbind, urows), file.path(wd, "state_update.csv"), row.names = FALSE)
+}
 writeLines(jsonlite::toJSON(list(R = R.version.string, airGR = as.character(packageVersion("airGR")), members = n,
                                  model = MODEL, pet = if (!is.null(f$PET_mm) && !all(is.na(f$PET_mm))) "forcing" else if (daily) "Oudin(daily mean T)" else "Oudin(daily mean T → 24 h)"),
                             auto_unbox = TRUE), file.path(wd, "versions.json"))

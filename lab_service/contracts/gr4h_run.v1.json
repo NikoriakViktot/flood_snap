@@ -261,6 +261,16 @@
             }
           }
         },
+        "state_update": {
+          "type": ["object", "null"], "required": ["day", "q_m3s", "observed_at"],
+          "description": "daily runs only: the morning state update from an observed discharge (the UkrHMC 08:00 bulletin level through the post's current rating curve). The routing store at the start of `day` is set so the simulated Q of that day equals q_m3s; use shadow (default) keeps the open-loop series as the main ones, primary makes the updated ones main; both are in the hydrograph's state_update block",
+          "properties": {"day": {"type": "string", "description": "YYYY-MM-DD, the model day the observation stands for, inside the event window"},
+                         "q_m3s": {"type": "number", "exclusiveMinimum": 0}, "observed_at": {"type": "string", "description": "ISO-8601 UTC of the observation"},
+                         "issued_at": {"type": ["string", "null"], "description": "the forecast's issue time: an observation after it is refused (no look-ahead)"},
+                         "source": {"type": ["string", "null"]}, "use": {"enum": ["shadow", "primary"]},
+                         "max_store_change_frac": {"type": "number", "exclusiveMinimum": 0, "maximum": 2},
+                         "provenance": {"type": ["object", "null"], "description": "level, rating curve, bulletin date…: carried into the products as is"}}
+        },
         "hydrotable": {
           "type": [
             "object",

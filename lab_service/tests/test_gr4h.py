@@ -164,15 +164,21 @@ def _fake_rscript(monkeypatch):
 
 
 def _run_child(tmp_path, params):
+    """The job child in a thread, its events read meanwhile: a result larger than the pipe buffer (~64 KB) would block
+    a child that runs before anyone reads (in operation the child is a process and the worker reads as it goes)."""
+    import threading
+
     from lab_service.gr4h.runner import gr4h_child
     parent, child = mp.Pipe(duplex=False)
-    gr4h_child({"job_id": "j1", "params": params}, str(tmp_path / "out"), child)
+    t = threading.Thread(target=gr4h_child, args=({"job_id": "j1", "params": params}, str(tmp_path / "out"), child), daemon=True)
+    t.start()
     events = []
     while True:
         try:
             events.append(parent.recv())
         except EOFError:
             break
+    t.join(timeout=600)
     return events
 
 
